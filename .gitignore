@@ -1,0 +1,39 @@
+# データベースファイル
+*.db
+worklogr.db
+
+# 実行ファイル
+worklogr
+*.exe
+
+# 設定ファイル（個人用）
+config.yaml
+*.local.yaml
+
+# 出力ファイル
+*.csv
+*.json
+ai_events.json
+events.csv
+
+# OS固有ファイル
+.DS_Store
+Thumbs.db
+
+# エディタ設定
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Goビルド成果物
+bin/
+dist/
+
+# ログファイル
+*.log
+
+# 一時ファイル
+tmp/
+temp/

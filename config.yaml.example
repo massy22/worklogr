@@ -1,0 +1,29 @@
+# worklogr configuration file
+# データベースパス（相対パスまたは絶対パス）
+database_path: "./worklogr.db"
+
+# タイムゾーン設定（全サービス共通）
+# 有効な値: Asia/Tokyo, UTC, America/New_York, Europe/London など
+# 詳細: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+timezone: "Asia/Tokyo"
+
+# サービス設定
+slack:
+  enabled: true
+  # Slack User Token (xoxp-で始まる)
+  # 取得方法: https://api.slack.com/apps → Your Apps → OAuth & Permissions
+  # 必要なスコープ: search:read
+  access_token: "xoxp-your-slack-user-token"
+
+github:
+  enabled: true
+  # GitHub Personal Access Token
+  # 取得方法: GitHub Settings → Developer settings → Personal access tokens
+  # 必要なスコープ: repo, user:email, read:org
+  access_token: "ghp_your-github-token"
+
+
+google_calendar:
+  enabled: true
+  # Google Calendar は gcloud 認証のみを使用
+  # セットアップ: gcloud auth application-default login
