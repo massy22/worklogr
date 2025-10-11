@@ -85,7 +85,7 @@ func NewSlackClientWithAuth(authManager auth.AuthManager, cfg *config.Config) (*
 
 	// 認証設定からアクセストークンを取得
 	authConfig := authManager.(*auth.SlackAuthManager).GetConfig()
-	
+
 	// 既存のコンストラクタを使用してクライアントを作成
 	slackClient, err := NewSlackClient(authConfig.AccessToken, cfg)
 	if err != nil {
@@ -153,7 +153,7 @@ func (sc *SlackClient) CollectSlackEvents(startTime, endTime time.Time) ([]*conf
 	if err != nil {
 		return nil, fmt.Errorf("検索ベースの収集に失敗しました: %w", err)
 	}
-	
+
 	fmt.Printf("✅ Search API による収集が成功しました！ %d 件のメッセージを発見\n", len(searchEvents))
 	events = append(events, searchEvents...)
 
@@ -163,7 +163,6 @@ func (sc *SlackClient) CollectSlackEvents(startTime, endTime time.Time) ([]*conf
 	fmt.Printf("合計 %d 件の Slack イベントを収集しました\n", len(events))
 	return events, nil
 }
-
 
 // collectMessagesViaSearch はSlack Search APIを使用してユーザーメッセージを包括的に収集します
 func (sc *SlackClient) collectMessagesViaSearch(startTime, endTime time.Time) ([]*config.Event, error) {
@@ -177,19 +176,19 @@ func (sc *SlackClient) collectMessagesViaSearch(startTime, endTime time.Time) ([
 	// Slackの検索フィルターは以下のように動作します:
 	// - before:YYYY-MM-DD は "YYYY-MM-DD 00:00:00" より前のメッセージを検索
 	// - after:YYYY-MM-DD は "YYYY-MM-DD 23:59:59" より後のメッセージを検索
-	
+
 	// 開始日については、開始日のメッセージを含めるため
 	// 開始日の前日を "after" に指定する必要があります
 	startDateForSearch := startTimeInTZ.AddDate(0, 0, -1).Format("2006-01-02")
-	
+
 	// 終了日については、終了日のメッセージを含めるため
 	// 終了日の翌日を "before" に指定する必要があります
 	endDateForSearch := endTimeInTZ.AddDate(0, 0, 1).Format("2006-01-02")
 
 	// 認証されたユーザーからのメッセージを検索
 	query := fmt.Sprintf("from:@%s after:%s before:%s", sc.userID, startDateForSearch, endDateForSearch)
-	
-	fmt.Printf("クエリでメッセージを検索中: %s (%s から %s をカバー)\n", 
+
+	fmt.Printf("クエリでメッセージを検索中: %s (%s から %s をカバー)\n",
 		query, startTime.Format("2006-01-02"), endTime.Format("2006-01-02"))
 
 	var searchResult *slack.SearchMessages
@@ -224,7 +223,7 @@ func (sc *SlackClient) collectMessagesViaSearch(startTime, endTime time.Time) ([
 		if endTime.Hour() == 0 && endTime.Minute() == 0 && endTime.Second() == 0 {
 			actualEndTime = endTime.Add(24*time.Hour - time.Second)
 		}
-		
+
 		if timestamp.Before(startTime) || timestamp.After(actualEndTime) {
 			continue
 		}
@@ -258,10 +257,10 @@ func (sc *SlackClient) collectMessagesViaSearch(startTime, endTime time.Time) ([
 	// より多くの結果がある場合はページネーションを処理
 	if searchResult.Paging.Pages > 1 {
 		fmt.Printf("追加ページを処理中 (全 %d ページ)...\n", searchResult.Paging.Pages)
-		
-		for page := 2; page <= searchResult.Paging.Pages && page <= 10; page++ { // 10ページに制限
+
+		for page := 2; page <= searchResult.Paging.Pages; page++ {
 			time.Sleep(1 * time.Second) // レート制限
-			
+
 			var pageResult *slack.SearchMessages
 			err := sc.retryClient.RetryableAPICall("search.messages (page)", func() error {
 				var err error
@@ -279,7 +278,7 @@ func (sc *SlackClient) collectMessagesViaSearch(startTime, endTime time.Time) ([
 				continue
 			}
 
-			fmt.Printf("ページ %d を処理中 (%d 件のメッセージ)\n", page, len(pageResult.Matches))
+			fmt.Printf("ページ %d/%d を処理中 (%d 件のメッセージ)\n", page, searchResult.Paging.Pages, len(pageResult.Matches))
 
 			for _, match := range pageResult.Matches {
 				ts, err := strconv.ParseFloat(match.Timestamp, 64)
@@ -294,7 +293,7 @@ func (sc *SlackClient) collectMessagesViaSearch(startTime, endTime time.Time) ([
 				if endTime.Hour() == 0 && endTime.Minute() == 0 && endTime.Second() == 0 {
 					actualEndTime = endTime.Add(24*time.Hour - time.Second)
 				}
-				
+
 				if timestamp.Before(startTime) || timestamp.After(actualEndTime) {
 					continue
 				}
@@ -327,7 +326,6 @@ func (sc *SlackClient) collectMessagesViaSearch(startTime, endTime time.Time) ([
 	fmt.Printf("検索で %d 件のメッセージを収集しました\n", len(events))
 	return events, nil
 }
-
 
 // createSearchMessageMetadata は検索結果メッセージのメタデータを作成します
 func (sc *SlackClient) createSearchMessageMetadata(match slack.SearchMessage) string {
