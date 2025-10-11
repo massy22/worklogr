@@ -84,7 +84,7 @@ func NewGitHubClientWithAuth(authManager auth.AuthManager, cfg *config.Config) (
 
 	// 認証設定からアクセストークンを取得
 	authConfig := authManager.(*auth.GitHubAuthManager).GetConfig()
-	
+
 	// 既存のコンストラクタを使用してクライアントを作成
 	githubClient, err := NewGitHubClientWithConfig(authConfig.AccessToken, cfg)
 	if err != nil {
@@ -296,7 +296,7 @@ func (gc *GitHubClient) collectPullRequests(repo *github.Repository, startTime, 
 			if endTime.Hour() == 0 && endTime.Minute() == 0 && endTime.Second() == 0 {
 				actualEndTime = endTime.Add(24*time.Hour - time.Second)
 			}
-			
+
 			// Check if PR was created or updated in the time range
 			if pr.GetCreatedAt().After(startTime) && pr.GetCreatedAt().Before(actualEndTime) {
 				event := &config.Event{
@@ -477,7 +477,7 @@ func (gc *GitHubClient) collectReleases(repo *github.Repository, startTime, endT
 			if endTime.Hour() == 0 && endTime.Minute() == 0 && endTime.Second() == 0 {
 				actualEndTime = endTime.Add(24*time.Hour - time.Second)
 			}
-			
+
 			createdAt := release.GetCreatedAt().Time
 			if createdAt.After(startTime) && createdAt.Before(actualEndTime) {
 				userID := gc.user
@@ -592,9 +592,9 @@ func (gc *GitHubClient) createReleaseMetadata(repo *github.Repository, release *
 // searchCommits searches for commits using GitHub Search API
 func (gc *GitHubClient) searchCommits(startDate, endDate string) ([]*config.Event, error) {
 	var events []*config.Event
-	
+
 	query := fmt.Sprintf("author:%s created:%s..%s", gc.user, startDate, endDate)
-	
+
 	opt := &github.SearchOptions{
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
@@ -688,16 +688,23 @@ func (gc *GitHubClient) searchPRReviews(startDate, endDate string) ([]*config.Ev
 
 	// Search for PRs reviewed by user
 	query := fmt.Sprintf("reviewed-by:%s type:pr updated:%s..%s", gc.user, startDate, endDate)
-	
+
 	opt := &github.SearchOptions{
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
+
+	// Track processed PRs to avoid duplicate API calls
+	processedPRs := make(map[string]bool)
+	totalPRs := 0
+	processedCount := 0
 
 	for {
 		result, resp, err := gc.client.Search.Issues(gc.ctx, query, opt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to search PR reviews: %w", err)
 		}
+
+		totalPRs += len(result.Issues)
 
 		for _, issue := range result.Issues {
 			// Convert issue to PR and get reviews
@@ -708,10 +715,25 @@ func (gc *GitHubClient) searchPRReviews(startDate, endDate string) ([]*config.Ev
 					continue
 				}
 
+				// Create unique key for this PR
+				prKey := fmt.Sprintf("%s/%s#%d", repoInfo.Owner, repoInfo.Name, issue.GetNumber())
+
+				// Skip if already processed
+				if processedPRs[prKey] {
+					continue
+				}
+				processedPRs[prKey] = true
+				processedCount++
+
+				// Show progress for large datasets
+				if processedCount%10 == 0 {
+					fmt.Printf("   レビュー取得中... %d/%d PRs 処理済み\n", processedCount, totalPRs)
+				}
+
 				// Get PR reviews to find the specific review by this user
 				reviews, err := gc.getPRReviewsInDateRange(repoInfo.Owner, repoInfo.Name, issue.GetNumber(), startDate, endDate)
 				if err != nil {
-					fmt.Printf("Warning: failed to get reviews for PR #%d: %v\n", issue.GetNumber(), err)
+					fmt.Printf("警告: PR #%d のレビュー取得に失敗しました: %v\n", issue.GetNumber(), err)
 					continue
 				}
 				events = append(events, reviews...)
@@ -731,7 +753,7 @@ func (gc *GitHubClient) searchPRReviews(startDate, endDate string) ([]*config.Ev
 
 func (gc *GitHubClient) searchIssuesByQuery(query, eventType string) ([]*config.Event, error) {
 	var events []*config.Event
-	
+
 	opt := &github.SearchOptions{
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
@@ -779,7 +801,7 @@ func (gc *GitHubClient) searchIssuesByQuery(query, eventType string) ([]*config.
 
 func (gc *GitHubClient) searchPRsByQuery(query, eventType string) ([]*config.Event, error) {
 	var events []*config.Event
-	
+
 	opt := &github.SearchOptions{
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
