@@ -104,26 +104,46 @@ func NewCalendarClientWithGCloud(cfg *config.Config) (*CalendarClient, error) {
 func (cc *CalendarClient) CollectCalendarEvents(startTime, endTime time.Time) ([]*config.Event, error) {
 	var events []*config.Event
 
+	fmt.Printf("📅 %s から %s まで Google Calendar イベントを収集中\n",
+		startTime.Format("2006-01-02 15:04:05"), endTime.Format("2006-01-02 15:04:05"))
+
 	// カレンダーのリストを取得
 	calendarList, err := cc.service.CalendarList.List().Do()
 	if err != nil {
 		return nil, fmt.Errorf("カレンダーリストの取得に失敗しました: %w", err)
 	}
 
+	// マイカレンダー（Primary）のみを対象にする
+	var primaryCal *calendar.CalendarListEntry
 	for _, cal := range calendarList.Items {
 		// アクセスできないカレンダーをスキップ
 		if cal.AccessRole == "freeBusyReader" {
 			continue
 		}
-
-		calendarEvents, err := cc.collectEventsFromCalendar(cal, startTime, endTime)
-		if err != nil {
-			fmt.Printf("警告: カレンダー %s からのイベント収集に失敗しました: %v\n", cal.Summary, err)
-			continue
+		if cal.Primary || (cc.userID != "" && cal.Id == cc.userID) {
+			primaryCal = cal
+			break
 		}
-		events = append(events, calendarEvents...)
+	}
+	if primaryCal == nil {
+		fmt.Println("Google Calendar: マイカレンダー（Primary）が見つかりませんでした（権限/設定をご確認ください）")
+		return events, nil
 	}
 
+	calName := primaryCal.Summary
+	if calName == "" {
+		calName = primaryCal.Id
+	}
+	fmt.Printf("Google Calendar: マイカレンダーを処理中: %s\n", calName)
+
+	calendarEvents, err := cc.collectEventsFromCalendar(primaryCal, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("マイカレンダー %s からのイベント収集に失敗しました: %w", calName, err)
+	}
+	fmt.Printf("   → %s: %d 件のイベントを収集しました\n", calName, len(calendarEvents))
+	events = append(events, calendarEvents...)
+
+	fmt.Printf("✅ 合計 %d 件の Google Calendar イベントを収集しました\n", len(events))
 	return events, nil
 }
 
@@ -149,11 +169,20 @@ func (cc *CalendarClient) collectEventsFromCalendar(cal *calendar.CalendarListEn
 		OrderBy("startTime").
 		MaxResults(2500)
 
+	calName := cal.Summary
+	if calName == "" {
+		calName = cal.Id
+	}
+
+	pageNum := 1
 	for {
 		eventsResult, err := eventsCall.Do()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get events: %w", err)
 		}
+
+		fmt.Printf("   [%s] ページ %d を処理中... (%d 件)\n", calName, pageNum, len(eventsResult.Items))
+		beforePageEvents := len(events)
 
 		for _, item := range eventsResult.Items {
 			// Skip events that were cancelled
@@ -245,11 +274,15 @@ func (cc *CalendarClient) collectEventsFromCalendar(cal *calendar.CalendarListEn
 			}
 		}
 
+		addedEvents := len(events) - beforePageEvents
+		fmt.Printf("   [%s] ページ %d 完了: %d 件のイベントを生成（累積 %d 件）\n", calName, pageNum, addedEvents, len(events))
+
 		// Check if there are more events
 		if eventsResult.NextPageToken == "" {
 			break
 		}
 		eventsCall.PageToken(eventsResult.NextPageToken)
+		pageNum++
 	}
 
 	return events, nil
