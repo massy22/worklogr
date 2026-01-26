@@ -1,24 +1,29 @@
+// Package services provides clients for external services.
 package services
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/iriam/worklogr/internal/config"
 	"github.com/iriam/worklogr/internal/utils"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/calendar/v3"
+	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
 )
 
 // CalendarClient はGoogle Calendar API操作を処理します
 type CalendarClient struct {
 	service         *calendar.Service
+	driveService    *drive.Service
 	ctx             context.Context
 	userID          string
 	timezoneManager *utils.TimezoneManager
+	options         config.GoogleCalendarOptions
 }
 
 // NewCalendarClient はgcloud認証を使用して新しいGoogle Calendarクライアントを作成します
@@ -34,6 +39,7 @@ func NewCalendarClientWithGCloud(cfg *config.Config) (*CalendarClient, error) {
 	creds, err := google.FindDefaultCredentials(ctx, 
 		calendar.CalendarReadonlyScope,
 		calendar.CalendarEventsReadonlyScope,
+		drive.DriveReadonlyScope,
 	)
 	
 	var service *calendar.Service
@@ -47,10 +53,15 @@ func NewCalendarClientWithGCloud(cfg *config.Config) (*CalendarClient, error) {
 		return nil, fmt.Errorf("gcloud認証が利用できません。'gcloud auth application-default login'を実行してください: %w", err)
 	}
 
+	driveService, err := drive.NewService(ctx, option.WithCredentials(creds))
+	if err != nil {
+		return nil, fmt.Errorf("gcloud認証でDriveサービスの作成に失敗しました: %w", err)
+	}
+
 	// 認証を確認するためユーザーのプライマリカレンダーを取得
 	calendarList, err := service.CalendarList.List().Do()
 	if err != nil {
-		return nil, fmt.Errorf("Google Calendar認証に失敗しました: %w", err)
+		return nil, fmt.Errorf("google calendar認証に失敗しました: %w", err)
 	}
 
 	var userID string
@@ -73,11 +84,18 @@ func NewCalendarClientWithGCloud(cfg *config.Config) (*CalendarClient, error) {
 		return nil, fmt.Errorf("タイムゾーンマネージャーの作成に失敗しました: %w", err2)
 	}
 
+	var options config.GoogleCalendarOptions
+	if cfg != nil {
+		options = cfg.GoogleCalendarOptions
+	}
+
 	return &CalendarClient{
 		service:         service,
+		driveService:    driveService,
 		ctx:             ctx,
 		userID:          userID,
 		timezoneManager: timezoneManager,
+		options:         options,
 	}, nil
 }
 
@@ -143,6 +161,9 @@ func (cc *CalendarClient) collectEventsFromCalendar(cal *calendar.CalendarListEn
 				continue
 			}
 
+			// Fetch Gemini notes once per calendar item (Google Docs attachments only)
+			attachments := cc.fetchDriveDocAttachments(item.Attachments)
+
 			// Parse event times
 			var eventStart, eventEnd time.Time
 			if item.Start.DateTime != "" {
@@ -177,7 +198,8 @@ func (cc *CalendarClient) collectEventsFromCalendar(cal *calendar.CalendarListEn
 						Content:   item.Summary,
 						Timestamp: createdTime,
 						UserID:    item.Creator.Email,
-						Metadata:  cc.createEventMetadata(cal, item, eventStart, eventEnd, "created"),
+						Metadata:  cc.createEventMetadata(cal, item, eventStart, eventEnd, "created", attachments),
+						Attachments: attachments,
 					}
 					events = append(events, event)
 				}
@@ -196,7 +218,8 @@ func (cc *CalendarClient) collectEventsFromCalendar(cal *calendar.CalendarListEn
 						Content:   item.Summary,
 						Timestamp: updatedTime,
 						UserID:    cc.userID,
-						Metadata:  cc.createEventMetadata(cal, item, eventStart, eventEnd, "updated"),
+						Metadata:  cc.createEventMetadata(cal, item, eventStart, eventEnd, "updated", attachments),
+						Attachments: attachments,
 					}
 					events = append(events, event)
 				}
@@ -214,7 +237,8 @@ func (cc *CalendarClient) collectEventsFromCalendar(cal *calendar.CalendarListEn
 						Content:   item.Summary,
 						Timestamp: eventStart,
 						UserID:    cc.userID,
-						Metadata:  cc.createEventMetadata(cal, item, eventStart, eventEnd, "attended"),
+						Metadata:  cc.createEventMetadata(cal, item, eventStart, eventEnd, "attended", attachments),
+						Attachments: attachments,
 					}
 					events = append(events, event)
 				}
@@ -299,7 +323,7 @@ func (cc *CalendarClient) getEventUpdater(event *calendar.Event) string {
 }
 
 // createEventMetadata creates metadata for a calendar event
-func (cc *CalendarClient) createEventMetadata(cal *calendar.CalendarListEntry, event *calendar.Event, startTime, endTime time.Time, action string) string {
+func (cc *CalendarClient) createEventMetadata(cal *calendar.CalendarListEntry, event *calendar.Event, startTime, endTime time.Time, action string, attachments []config.EventAttachment) string {
 	metadata := map[string]interface{}{
 		"calendar_id":   cal.Id,
 		"calendar_name": cal.Summary,
@@ -310,6 +334,20 @@ func (cc *CalendarClient) createEventMetadata(cal *calendar.CalendarListEntry, e
 		"location":      event.Location,
 		"description":   event.Description,
 		"html_link":     event.HtmlLink,
+	}
+
+	// Attachments are stored separately; keep only lightweight references in metadata.
+	if len(attachments) > 0 {
+		var refs []map[string]interface{}
+		for _, a := range attachments {
+			refs = append(refs, map[string]interface{}{
+				"file_id":   a.FileID,
+				"title":     a.Title,
+				"mime_type": a.MimeType,
+				"truncated": a.Truncated,
+			})
+		}
+		metadata["gemini_note_files"] = refs
 	}
 
 	// Add attendee information
@@ -377,6 +415,76 @@ func (cc *CalendarClient) createEventMetadata(cal *calendar.CalendarListEntry, e
 
 	data, _ := json.Marshal(metadata)
 	return string(data)
+}
+
+func (cc *CalendarClient) fetchDriveDocAttachments(attachments []*calendar.EventAttachment) []config.EventAttachment {
+	if !cc.options.ShouldFetchDriveAttachments() || cc.driveService == nil || len(attachments) == 0 {
+		return nil
+	}
+
+	maxChars := cc.options.EffectiveAttachmentTextMaxChars()
+
+	var notes []config.EventAttachment
+	for _, a := range attachments {
+		if a == nil || a.FileId == "" {
+			continue
+		}
+
+		mimeType := a.MimeType
+		title := a.Title
+		if mimeType == "" || title == "" {
+			if f, err := cc.driveService.Files.Get(a.FileId).Fields("mimeType,name,webViewLink").Do(); err == nil && f != nil {
+				if mimeType == "" {
+					mimeType = f.MimeType
+				}
+				if title == "" {
+					title = f.Name
+				}
+			}
+		}
+
+		// Geminiメモ用: Googleドキュメントのみ対象（録画/その他添付は除外）
+		if mimeType != "application/vnd.google-apps.document" {
+			continue
+		}
+
+		exportMime := "text/plain"
+
+		resp, err := cc.driveService.Files.Export(a.FileId, exportMime).Download()
+		if err != nil || resp == nil || resp.Body == nil {
+			continue
+		}
+		func() {
+			defer resp.Body.Close()
+
+			// Limit bytes to keep DB/export sane (approx up to 4 bytes per char)
+			maxBytes := int64(maxChars*4 + 1024)
+			b, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+			if err != nil {
+				return
+			}
+
+			text := string(b)
+			runes := []rune(text)
+			excerpt := text
+			truncated := false
+			if len(runes) > maxChars {
+				excerpt = string(runes[:maxChars])
+				truncated = true
+			}
+
+			notes = append(notes, config.EventAttachment{
+				FileID:    a.FileId,
+				Title:     title,
+				MimeType:  mimeType,
+				ExportAs:  exportMime,
+				TextFull:  excerpt,
+				Truncated: truncated,
+			})
+		}()
+	}
+
+	return notes
 }
 
 // GetCalendarList returns a list of available calendars

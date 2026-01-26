@@ -1,3 +1,4 @@
+// Package database provides SQLite persistence for collected events.
 package database
 
 import (
@@ -5,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/iriam/worklogr/internal/config"
@@ -56,6 +58,20 @@ func (dm *DatabaseManager) CreateTables() error {
 	CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 	CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
 	CREATE INDEX IF NOT EXISTS idx_events_user_id ON events(user_id);
+
+	CREATE TABLE IF NOT EXISTS event_attachments (
+		id TEXT PRIMARY KEY,
+		event_id TEXT NOT NULL,
+		file_id TEXT NOT NULL,
+		title TEXT,
+		mime_type TEXT,
+		export_as TEXT,
+		text_full TEXT,
+		truncated INTEGER,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_event_attachments_event_id ON event_attachments(event_id);
 	`
 
 	if _, err := dm.db.Exec(query); err != nil {
@@ -65,14 +81,31 @@ func (dm *DatabaseManager) CreateTables() error {
 	return nil
 }
 
+func attachmentRowID(eventID, fileID string) string {
+	// Use a deterministic, sqlite-safe identifier.
+	// Avoid extremely long hashes; event IDs here are already stable.
+	// Replace whitespace just in case.
+	return strings.ReplaceAll(eventID+"__"+fileID, " ", "_")
+}
+
 // InsertEvent inserts a new event into the database
 func (dm *DatabaseManager) InsertEvent(event *config.Event) error {
-	query := `
-	INSERT OR REPLACE INTO events (id, service, type, title, content, timestamp, metadata, user_id)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`
+	tx, err := dm.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
 
-	_, err := dm.db.Exec(query,
+	stmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO events (id, service, type, title, content, timestamp, metadata, user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	if _, err := stmt.Exec(
 		event.ID,
 		event.Service,
 		event.Type,
@@ -81,12 +114,17 @@ func (dm *DatabaseManager) InsertEvent(event *config.Event) error {
 		event.Timestamp,
 		event.Metadata,
 		event.UserID,
-	)
-
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("failed to insert event: %w", err)
 	}
 
+	if err := dm.insertAttachmentsTx(tx, event); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
 	return nil
 }
 
@@ -121,10 +159,54 @@ func (dm *DatabaseManager) InsertEvents(events []*config.Event) error {
 		if err != nil {
 			return fmt.Errorf("failed to insert event %s: %w", event.ID, err)
 		}
+
+		if err := dm.insertAttachmentsTx(tx, event); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+func (dm *DatabaseManager) insertAttachmentsTx(tx *sql.Tx, event *config.Event) error {
+	if event == nil || len(event.Attachments) == 0 {
+		return nil
+	}
+
+	attachStmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO event_attachments
+		(id, event_id, file_id, title, mime_type, export_as, text_full, truncated)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare attachment statement: %w", err)
+	}
+	defer attachStmt.Close()
+
+	for _, a := range event.Attachments {
+		if a.FileID == "" {
+			continue
+		}
+		truncated := 0
+		if a.Truncated {
+			truncated = 1
+		}
+		if _, err := attachStmt.Exec(
+			attachmentRowID(event.ID, a.FileID),
+			event.ID,
+			a.FileID,
+			a.Title,
+			a.MimeType,
+			a.ExportAs,
+			a.TextFull,
+			truncated,
+		); err != nil {
+			return fmt.Errorf("failed to insert attachment for event %s: %w", event.ID, err)
+		}
 	}
 
 	return nil
@@ -186,7 +268,88 @@ func (dm *DatabaseManager) GetEvents(startTime, endTime time.Time, services []st
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
+	// Hydrate attachments from separate table
+	if err := dm.populateAttachments(events); err != nil {
+		return nil, err
+	}
+
 	return events, nil
+}
+
+func (dm *DatabaseManager) populateAttachments(events []*config.Event) error {
+	if len(events) == 0 {
+		return nil
+	}
+
+	ids := make([]string, 0, len(events))
+	eventByID := make(map[string]*config.Event, len(events))
+	for _, e := range events {
+		if e == nil || e.ID == "" {
+			continue
+		}
+		ids = append(ids, e.ID)
+		eventByID[e.ID] = e
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// SQLite has a default max variable number (commonly 999). Chunk to be safe.
+	const chunkSize = 900
+	for i := 0; i < len(ids); i += chunkSize {
+		end := i + chunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[i:end]
+
+		placeholders := make([]string, 0, len(chunk))
+		args := make([]interface{}, 0, len(chunk))
+		for _, id := range chunk {
+			placeholders = append(placeholders, "?")
+			args = append(args, id)
+		}
+
+		q := `
+			SELECT event_id, file_id, title, mime_type, export_as, text_full, truncated
+			FROM event_attachments
+			WHERE event_id IN (` + strings.Join(placeholders, ",") + `)
+			ORDER BY created_at ASC
+		`
+
+		rows, err := dm.db.Query(q, args...)
+		if err != nil {
+			return fmt.Errorf("failed to query event attachments: %w", err)
+		}
+		for rows.Next() {
+			var eventID, fileID, title, mimeType, exportAs, textFull string
+			var truncatedInt int
+			if err := rows.Scan(&eventID, &fileID, &title, &mimeType, &exportAs, &textFull, &truncatedInt); err != nil {
+				rows.Close()
+				return fmt.Errorf("failed to scan attachment row: %w", err)
+			}
+
+			e := eventByID[eventID]
+			if e == nil {
+				continue
+			}
+			e.Attachments = append(e.Attachments, config.EventAttachment{
+				FileID:    fileID,
+				Title:     title,
+				MimeType:  mimeType,
+				ExportAs:  exportAs,
+				TextFull:  textFull,
+				Truncated: truncatedInt != 0,
+			})
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("error iterating attachment rows: %w", err)
+		}
+		rows.Close()
+	}
+
+	return nil
 }
 
 // GetEventsByService retrieves events for a specific service within a time range

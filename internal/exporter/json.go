@@ -1,3 +1,4 @@
+// Package exporter provides export formats for collected events.
 package exporter
 
 import (
@@ -297,6 +298,15 @@ func (je *JSONExporter) convertEventsForAI(events []*config.Event) []AIEvent {
 			if err := json.Unmarshal([]byte(event.Metadata), &metadata); err == nil {
 				aiEvent.Context = metadata
 			}
+		}
+
+		// Attachments are stored separately and hydrated by DB layer.
+		// Include them in AI context when present.
+		if len(event.Attachments) > 0 {
+			if aiEvent.Context == nil {
+				aiEvent.Context = map[string]interface{}{}
+			}
+			aiEvent.Context["attachments"] = event.Attachments
 		}
 
 		aiEvents = append(aiEvents, aiEvent)

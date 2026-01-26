@@ -119,7 +119,7 @@ Google Calendarはgcloud認証のみを使用します：
 gcloud auth login
 
 # Calendar APIスコープ付きでApplication Default Credentials設定
-gcloud auth application-default login --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/calendar.readonly,https://www.googleapis.com/auth/calendar.events.readonly
+gcloud auth application-default login --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/calendar.readonly,https://www.googleapis.com/auth/calendar.events.readonly,https://www.googleapis.com/auth/drive.readonly
 
 # Google Cloud プロジェクトを設定（必須）
 gcloud config set project YOUR_PROJECT_ID
@@ -129,6 +129,9 @@ gcloud auth application-default set-quota-project YOUR_PROJECT_ID
 
 # Calendar APIを有効化
 gcloud services enable calendar-json.googleapis.com
+
+# Drive APIを有効化（Geminiメモ等の添付取得用）
+gcloud services enable drive.googleapis.com
 
 # gcloud認証状態の確認
 ./worklogr gcloud status

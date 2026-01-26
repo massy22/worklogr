@@ -1,3 +1,4 @@
+// Package auth provides authentication managers and token utilities.
 package auth
 
 import (
@@ -362,7 +363,7 @@ func (c *CalendarAuthManager) IsGCloudAuthenticated() bool {
 	}
 
 	gcloudConfigDir := filepath.Join(homeDir, ".config", "gcloud")
-	if _, err := os.Stat(gcloudConfigDir); os.IsNotExist(err) {
+	if _, statErr := os.Stat(gcloudConfigDir); os.IsNotExist(statErr) {
 		return false
 	}
 
@@ -382,8 +383,8 @@ func (c *CalendarAuthManager) SetupGCloudAuth() string {
 2. Googleアカウントで認証:
    gcloud auth login
 
-3. Calendar APIスコープでApplication Default Credentialsをセットアップ:
-   gcloud auth application-default login --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/calendar.readonly,https://www.googleapis.com/auth/calendar.events.readonly
+3. Calendar/Drive APIスコープでApplication Default Credentialsをセットアップ:
+   gcloud auth application-default login --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/calendar.readonly,https://www.googleapis.com/auth/calendar.events.readonly,https://www.googleapis.com/auth/drive.readonly
 
 4. Google Cloudプロジェクトを設定（必須）:
    gcloud config set project YOUR_PROJECT_ID
@@ -403,6 +404,9 @@ func (c *CalendarAuthManager) SetupGCloudAuth() string {
    
    注意: これによりプロジェクト全体でCalendar APIが有効になります。
    このプロジェクトを使用するすべてのアプリケーションがCalendar APIにアクセスできます。
+
+7. Google CloudプロジェクトでDrive APIを有効化（Geminiメモ等の添付取得用）:
+   gcloud services enable drive.googleapis.com
 
 これらの手順を完了すると、worklogrは自動的にgcloud認証情報を使用します。
 

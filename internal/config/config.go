@@ -1,3 +1,4 @@
+// Package config defines configuration and event types for worklogr.
 package config
 
 import (
@@ -39,9 +40,31 @@ type Config struct {
 	Slack        ServiceConfig `yaml:"slack"`
 	GitHub       ServiceConfig `yaml:"github"`
 	GoogleCal    ServiceConfig `yaml:"google_calendar"`
+	GoogleCalendarOptions GoogleCalendarOptions `yaml:"google_calendar_options"`
 	Okta         OktaConfig    `yaml:"okta"`
 	DatabasePath string        `yaml:"database_path"`
 	Timezone     string        `yaml:"timezone"`
+}
+
+// GoogleCalendarOptions controls optional calendar collection behavior.
+// Note: FetchDriveAttachments defaults to true when omitted.
+type GoogleCalendarOptions struct {
+	FetchDriveAttachments  *bool `yaml:"fetch_drive_attachments"`
+	AttachmentTextMaxChars int   `yaml:"attachment_text_max_chars"`
+}
+
+func (o GoogleCalendarOptions) ShouldFetchDriveAttachments() bool {
+	if o.FetchDriveAttachments == nil {
+		return true
+	}
+	return *o.FetchDriveAttachments
+}
+
+func (o GoogleCalendarOptions) EffectiveAttachmentTextMaxChars() int {
+	if o.AttachmentTextMaxChars <= 0 {
+		return 100000
+	}
+	return o.AttachmentTextMaxChars
 }
 
 // Event represents a collected event from any service
@@ -54,6 +77,19 @@ type Event struct {
 	Timestamp time.Time `json:"timestamp" db:"timestamp"`
 	Metadata  string    `json:"metadata" db:"metadata"`
 	UserID    string    `json:"user_id" db:"user_id"`
+	// Attachments are stored separately (see DB table event_attachments).
+	Attachments []EventAttachment `json:"attachments,omitempty" db:"-"`
+}
+
+// EventAttachment represents an attachment associated with an event.
+// Primary use: Google Calendar Gemini notes stored as Google Docs.
+type EventAttachment struct {
+	FileID    string `json:"file_id" db:"file_id"`
+	Title     string `json:"title,omitempty" db:"title"`
+	MimeType  string `json:"mime_type,omitempty" db:"mime_type"`
+	ExportAs  string `json:"export_as,omitempty" db:"export_as"`
+	TextFull  string `json:"text_full,omitempty" db:"text_full"`
+	Truncated bool   `json:"truncated,omitempty" db:"truncated"`
 }
 
 // LoadConfig loads configuration from the specified file
@@ -103,6 +139,13 @@ func LoadConfig(configPath string) (*Config, error) {
 		config.Timezone = "Asia/Tokyo" // Default to JST
 	}
 
+	// Defaults for optional Google Calendar behaviors
+	// FetchDriveAttachments: default ON (true) when omitted
+	// AttachmentTextMaxChars: default 100000 when omitted/invalid
+	if config.GoogleCalendarOptions.AttachmentTextMaxChars <= 0 {
+		config.GoogleCalendarOptions.AttachmentTextMaxChars = 100000
+	}
+
 	return &config, nil
 }
 
@@ -150,6 +193,10 @@ func createDefaultConfig(configPath string) (*Config, error) {
 		},
 		GoogleCal: ServiceConfig{
 			Enabled: false,
+		},
+		GoogleCalendarOptions: GoogleCalendarOptions{
+			// FetchDriveAttachments is intentionally left nil to mean "default ON".
+			AttachmentTextMaxChars: 100000,
 		},
 		DatabasePath: filepath.Join(currentDir, "worklogr.db"),
 		Timezone:     "Asia/Tokyo", // Default to JST

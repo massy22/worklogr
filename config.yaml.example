@@ -27,3 +27,11 @@ google_calendar:
   enabled: true
   # Google Calendar は gcloud 認証のみを使用
   # セットアップ: gcloud auth application-default login
+
+# Google Calendar収集オプション
+# fetch_drive_attachments は未指定の場合 true（デフォルトON）
+google_calendar_options:
+  # Drive上の添付（Google Docs等）をexportして本文テキストをMetadataに含める
+  fetch_drive_attachments: true
+  # 取り込む本文の最大文字数（超過分は切り捨て）
+  attachment_text_max_chars: 100000
