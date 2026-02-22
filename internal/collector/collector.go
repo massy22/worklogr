@@ -205,7 +205,8 @@ func (ec *EventCollector) InitializeServicesFor(serviceNames []string) error {
 		return fmt.Errorf("初期化対象サービスが指定されていません")
 	}
 
-	for _, serviceName := range serviceNames {
+	orderedServiceNames := prioritizeCalendarService(serviceNames)
+	for _, serviceName := range orderedServiceNames {
 		switch serviceName {
 		case "slack":
 			if !ec.config.Slack.Enabled {
@@ -260,6 +261,20 @@ func (ec *EventCollector) InitializeServicesFor(serviceNames []string) error {
 
 	fmt.Printf("Initialized %d target service(s)\n", len(ec.services))
 	return nil
+}
+
+// prioritizeCalendarService は、google_calendar を初期化順の先頭に移動します。
+func prioritizeCalendarService(serviceNames []string) []string {
+	var prioritized []string
+	var others []string
+	for _, serviceName := range serviceNames {
+		if serviceName == "google_calendar" {
+			prioritized = append(prioritized, serviceName)
+			continue
+		}
+		others = append(others, serviceName)
+	}
+	return append(prioritized, others...)
 }
 
 // CollectEvents は指定された時間範囲内で有効なすべてのサービスからイベントを収集します
