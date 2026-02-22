@@ -45,7 +45,6 @@ func (g *GitHubServiceClient) CollectEvents(startTime, endTime time.Time) ([]*co
 	return g.client.CollectGitHubEvents(startTime, endTime)
 }
 
-
 // CalendarServiceClient はServiceClientインターフェースを実装するためCalendarクライアントをラップします
 type CalendarServiceClient struct {
 	client *services.CalendarClient
@@ -153,6 +152,8 @@ func (ec *EventCollector) initializeAuthManagers() {
 
 // InitializeServices は有効なすべてのサービスクライアントを初期化します
 func (ec *EventCollector) InitializeServices() error {
+	ec.services = make(map[string]ServiceClient)
+
 	// Slackクライアントを初期化
 	if ec.config.Slack.Enabled && ec.config.Slack.AccessToken != "" {
 		slackClient, err := services.NewSlackClient(ec.config.Slack.AccessToken, ec.config)
@@ -175,7 +176,6 @@ func (ec *EventCollector) InitializeServices() error {
 		}
 	}
 
-
 	// Google Calendarクライアントを初期化
 	if ec.config.GoogleCal.Enabled {
 		// gcloud認証のみを使用
@@ -193,6 +193,72 @@ func (ec *EventCollector) InitializeServices() error {
 	}
 
 	fmt.Printf("Initialized %d service(s)\n", len(ec.services))
+	return nil
+}
+
+// InitializeServicesFor は指定されたサービスのみを初期化します。
+// 指定されたサービスの初期化に失敗した場合は即座にエラーを返します。
+func (ec *EventCollector) InitializeServicesFor(serviceNames []string) error {
+	ec.services = make(map[string]ServiceClient)
+
+	if len(serviceNames) == 0 {
+		return fmt.Errorf("初期化対象サービスが指定されていません")
+	}
+
+	for _, serviceName := range serviceNames {
+		switch serviceName {
+		case "slack":
+			if !ec.config.Slack.Enabled {
+				return fmt.Errorf("サービス 'slack' は設定で無効です")
+			}
+			if ec.config.Slack.AccessToken == "" {
+				return fmt.Errorf("サービス 'slack' のアクセストークンが未設定です")
+			}
+			slackClient, err := services.NewSlackClient(ec.config.Slack.AccessToken, ec.config)
+			if err != nil {
+				return fmt.Errorf("slackクライアントの初期化に失敗しました: %w", err)
+			}
+			ec.services["slack"] = &SlackServiceClient{client: slackClient}
+			fmt.Println("Slack client initialized successfully")
+
+		case "github":
+			if !ec.config.GitHub.Enabled {
+				return fmt.Errorf("サービス 'github' は設定で無効です")
+			}
+			if ec.config.GitHub.AccessToken == "" {
+				return fmt.Errorf("サービス 'github' のアクセストークンが未設定です")
+			}
+			githubClient, err := services.NewGitHubClientWithConfig(ec.config.GitHub.AccessToken, ec.config)
+			if err != nil {
+				return fmt.Errorf("githubクライアントの初期化に失敗しました: %w", err)
+			}
+			ec.services["github"] = &GitHubServiceClient{client: githubClient}
+			fmt.Println("GitHub client initialized successfully")
+
+		case "google_calendar":
+			if !ec.config.GoogleCal.Enabled {
+				return fmt.Errorf("サービス 'google_calendar' は設定で無効です")
+			}
+			calendarClient, err := services.NewCalendarClient(ec.config)
+			if err != nil {
+				return fmt.Errorf(
+					"google calendarクライアントの初期化に失敗しました: %w\nヒント: `worklogr gcloud status` で状態確認し、必要なら `gcloud auth application-default login` を実行してください",
+					err,
+				)
+			}
+			ec.services["google_calendar"] = &CalendarServiceClient{client: calendarClient}
+			fmt.Println("Google Calendar client initialized successfully")
+
+		default:
+			return fmt.Errorf("未知のサービスが指定されました: %s", serviceName)
+		}
+	}
+
+	if len(ec.services) == 0 {
+		return fmt.Errorf("有効または適切に設定されたサービスがありません")
+	}
+
+	fmt.Printf("Initialized %d target service(s)\n", len(ec.services))
 	return nil
 }
 
@@ -222,7 +288,7 @@ func (ec *EventCollector) CollectEvents(startTime, endTime time.Time, serviceNam
 	// 各サービスからイベントを収集
 	for serviceName, client := range servicesToCollect {
 		fmt.Printf("Collecting events from %s...\n", serviceName)
-		
+
 		events, err := client.CollectEvents(startTime, endTime)
 		if err != nil {
 			fmt.Printf("Error collecting events from %s: %v\n", serviceName, err)
@@ -266,7 +332,6 @@ func (ec *EventCollector) CollectAndStore(startTime, endTime time.Time, serviceN
 func (ec *EventCollector) GetStoredEvents(startTime, endTime time.Time, serviceNames []string) ([]*config.Event, error) {
 	return ec.db.GetEvents(startTime, endTime, serviceNames)
 }
-
 
 // GetServiceStatus はすべてのサービスの状態を返します
 func (ec *EventCollector) GetServiceStatus() map[string]ServiceStatus {
@@ -360,7 +425,7 @@ func (ec *EventCollector) GetAvailableServices() []string {
 // GetEnabledServices は設定から有効なサービス名のリストを返します
 func (ec *EventCollector) GetEnabledServices() []string {
 	var services []string
-	
+
 	if ec.config.Slack.Enabled {
 		services = append(services, "slack")
 	}
