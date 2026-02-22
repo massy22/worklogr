@@ -18,6 +18,8 @@ import (
 
 var calendarLogger = utils.NewLogger().WithService("google_calendar")
 
+const calendarProgressLogInterval = 20
+
 // CalendarClient はGoogle Calendar API操作を処理します
 type CalendarClient struct {
 	service         *calendar.Service
@@ -185,10 +187,25 @@ func (cc *CalendarClient) collectEventsFromCalendar(cal *calendar.CalendarListEn
 
 		calendarLogger.Infof("[%s] ページ %d を処理中: %d 件", calName, pageNum, len(eventsResult.Items))
 		beforePageEvents := len(events)
+		processedCount := 0
+		totalItems := len(eventsResult.Items)
 
 		for _, item := range eventsResult.Items {
+			processedCount++
+
 			// Skip events that were cancelled
 			if item.Status == "cancelled" {
+				if processedCount%calendarProgressLogInterval == 0 {
+					addedSoFar := len(events) - beforePageEvents
+					calendarLogger.Infof(
+						"[%s] ページ %d 進捗: %d/%d 件（追加 %d 件）",
+						calName,
+						pageNum,
+						processedCount,
+						totalItems,
+						addedSoFar,
+					)
+				}
 				continue
 			}
 
@@ -273,6 +290,18 @@ func (cc *CalendarClient) collectEventsFromCalendar(cal *calendar.CalendarListEn
 					}
 					events = append(events, event)
 				}
+			}
+
+			if processedCount%calendarProgressLogInterval == 0 {
+				addedSoFar := len(events) - beforePageEvents
+				calendarLogger.Infof(
+					"[%s] ページ %d 進捗: %d/%d 件（追加 %d 件）",
+					calName,
+					pageNum,
+					processedCount,
+					totalItems,
+					addedSoFar,
+				)
 			}
 		}
 
