@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/iriam/worklogr/internal/auth"
@@ -300,19 +301,35 @@ func (ec *EventCollector) CollectEvents(startTime, endTime time.Time, serviceNam
 
 	fmt.Printf("Collecting events from %s to %s\n", startTime.Format("2006-01-02 15:04:05"), endTime.Format("2006-01-02 15:04:05"))
 
-	// 各サービスからイベントを収集
+	// 各サービスからイベントを並列収集
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
 	for serviceName, client := range servicesToCollect {
-		fmt.Printf("Collecting events from %s...\n", serviceName)
+		serviceName := serviceName
+		client := client
 
-		events, err := client.CollectEvents(startTime, endTime)
-		if err != nil {
-			fmt.Printf("Error collecting events from %s: %v\n", serviceName, err)
-			continue
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 
-		fmt.Printf("Collected %d events from %s\n", len(events), serviceName)
-		allEvents = append(allEvents, events...)
+			fmt.Printf("Collecting events from %s...\n", serviceName)
+
+			events, err := client.CollectEvents(startTime, endTime)
+			if err != nil {
+				fmt.Printf("Error collecting events from %s: %v\n", serviceName, err)
+				return
+			}
+
+			fmt.Printf("Collected %d events from %s\n", len(events), serviceName)
+
+			mu.Lock()
+			allEvents = append(allEvents, events...)
+			mu.Unlock()
+		}()
 	}
+
+	wg.Wait()
 
 	// イベントをタイムスタンプでソート
 	ec.sortEventsByTimestamp(allEvents)
