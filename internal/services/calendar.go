@@ -16,6 +16,8 @@ import (
 	"google.golang.org/api/option"
 )
 
+var calendarLogger = utils.NewLogger().WithService("google_calendar")
+
 // CalendarClient はGoogle Calendar API操作を処理します
 type CalendarClient struct {
 	service         *calendar.Service
@@ -104,7 +106,7 @@ func NewCalendarClientWithGCloud(cfg *config.Config) (*CalendarClient, error) {
 func (cc *CalendarClient) CollectCalendarEvents(startTime, endTime time.Time) ([]*config.Event, error) {
 	var events []*config.Event
 
-	fmt.Printf("📅 %s から %s まで Google Calendar イベントを収集中\n",
+	calendarLogger.Infof("%s から %s までGoogle Calendarイベントを収集します",
 		startTime.Format("2006-01-02 15:04:05"), endTime.Format("2006-01-02 15:04:05"))
 
 	// カレンダーのリストを取得
@@ -126,7 +128,7 @@ func (cc *CalendarClient) CollectCalendarEvents(startTime, endTime time.Time) ([
 		}
 	}
 	if primaryCal == nil {
-		fmt.Println("Google Calendar: マイカレンダー（Primary）が見つかりませんでした（権限/設定をご確認ください）")
+		calendarLogger.Warnf("マイカレンダー（Primary）が見つかりませんでした（権限/設定をご確認ください）")
 		return events, nil
 	}
 
@@ -134,16 +136,16 @@ func (cc *CalendarClient) CollectCalendarEvents(startTime, endTime time.Time) ([
 	if calName == "" {
 		calName = primaryCal.Id
 	}
-	fmt.Printf("Google Calendar: マイカレンダーを処理中: %s\n", calName)
+	calendarLogger.Infof("マイカレンダーを処理中: %s", calName)
 
 	calendarEvents, err := cc.collectEventsFromCalendar(primaryCal, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("マイカレンダー %s からのイベント収集に失敗しました: %w", calName, err)
 	}
-	fmt.Printf("   → %s: %d 件のイベントを収集しました\n", calName, len(calendarEvents))
+	calendarLogger.Infof("%s から %d 件のイベントを収集しました", calName, len(calendarEvents))
 	events = append(events, calendarEvents...)
 
-	fmt.Printf("✅ 合計 %d 件の Google Calendar イベントを収集しました\n", len(events))
+	calendarLogger.Infof("Google Calendarイベント収集完了: 合計 %d 件", len(events))
 	return events, nil
 }
 
@@ -181,7 +183,7 @@ func (cc *CalendarClient) collectEventsFromCalendar(cal *calendar.CalendarListEn
 			return nil, fmt.Errorf("failed to get events: %w", err)
 		}
 
-		fmt.Printf("   [%s] ページ %d を処理中... (%d 件)\n", calName, pageNum, len(eventsResult.Items))
+		calendarLogger.Infof("[%s] ページ %d を処理中: %d 件", calName, pageNum, len(eventsResult.Items))
 		beforePageEvents := len(events)
 
 		for _, item := range eventsResult.Items {
@@ -275,7 +277,7 @@ func (cc *CalendarClient) collectEventsFromCalendar(cal *calendar.CalendarListEn
 		}
 
 		addedEvents := len(events) - beforePageEvents
-		fmt.Printf("   [%s] ページ %d 完了: %d 件のイベントを生成（累積 %d 件）\n", calName, pageNum, addedEvents, len(events))
+		calendarLogger.Infof("[%s] ページ %d 完了: %d 件追加（累積 %d 件）", calName, pageNum, addedEvents, len(events))
 
 		// Check if there are more events
 		if eventsResult.NextPageToken == "" {

@@ -13,6 +13,8 @@ import (
 	"github.com/iriam/worklogr/internal/utils"
 )
 
+var collectorLogger = utils.NewLogger().WithService("collector")
+
 // EventCollector は複数のサービスからのイベント収集を管理します
 type EventCollector struct {
 	config          *config.Config
@@ -159,10 +161,10 @@ func (ec *EventCollector) InitializeServices() error {
 	if ec.config.Slack.Enabled && ec.config.Slack.AccessToken != "" {
 		slackClient, err := services.NewSlackClient(ec.config.Slack.AccessToken, ec.config)
 		if err != nil {
-			fmt.Printf("警告: Slackクライアントの初期化に失敗しました: %v\n", err)
+			collectorLogger.Warnf("Slackクライアントの初期化に失敗しました: %v", err)
 		} else {
 			ec.services["slack"] = &SlackServiceClient{client: slackClient}
-			fmt.Println("Slack client initialized successfully")
+			collectorLogger.Infof("Slackクライアントを初期化しました")
 		}
 	}
 
@@ -170,10 +172,10 @@ func (ec *EventCollector) InitializeServices() error {
 	if ec.config.GitHub.Enabled && ec.config.GitHub.AccessToken != "" {
 		githubClient, err := services.NewGitHubClientWithConfig(ec.config.GitHub.AccessToken, ec.config)
 		if err != nil {
-			fmt.Printf("警告: GitHubクライアントの初期化に失敗しました: %v\n", err)
+			collectorLogger.Warnf("GitHubクライアントの初期化に失敗しました: %v", err)
 		} else {
 			ec.services["github"] = &GitHubServiceClient{client: githubClient}
-			fmt.Println("GitHub client initialized successfully")
+			collectorLogger.Infof("GitHubクライアントを初期化しました")
 		}
 	}
 
@@ -182,10 +184,10 @@ func (ec *EventCollector) InitializeServices() error {
 		// gcloud認証のみを使用
 		calendarClient, err := services.NewCalendarClient(ec.config)
 		if err != nil {
-			fmt.Printf("警告: Google Calendarクライアントの初期化に失敗しました: %v\n", err)
+			collectorLogger.Warnf("Google Calendarクライアントの初期化に失敗しました: %v", err)
 		} else {
 			ec.services["google_calendar"] = &CalendarServiceClient{client: calendarClient}
-			fmt.Println("Google Calendar client initialized successfully")
+			collectorLogger.Infof("Google Calendarクライアントを初期化しました")
 		}
 	}
 
@@ -193,7 +195,7 @@ func (ec *EventCollector) InitializeServices() error {
 		return fmt.Errorf("有効または適切に設定されたサービスがありません")
 	}
 
-	fmt.Printf("Initialized %d service(s)\n", len(ec.services))
+	collectorLogger.Infof("%d 件のサービスを初期化しました", len(ec.services))
 	return nil
 }
 
@@ -221,7 +223,7 @@ func (ec *EventCollector) InitializeServicesFor(serviceNames []string) error {
 				return fmt.Errorf("slackクライアントの初期化に失敗しました: %w", err)
 			}
 			ec.services["slack"] = &SlackServiceClient{client: slackClient}
-			fmt.Println("Slack client initialized successfully")
+			collectorLogger.Infof("Slackクライアントを初期化しました")
 
 		case "github":
 			if !ec.config.GitHub.Enabled {
@@ -235,7 +237,7 @@ func (ec *EventCollector) InitializeServicesFor(serviceNames []string) error {
 				return fmt.Errorf("githubクライアントの初期化に失敗しました: %w", err)
 			}
 			ec.services["github"] = &GitHubServiceClient{client: githubClient}
-			fmt.Println("GitHub client initialized successfully")
+			collectorLogger.Infof("GitHubクライアントを初期化しました")
 
 		case "google_calendar":
 			if !ec.config.GoogleCal.Enabled {
@@ -249,7 +251,7 @@ func (ec *EventCollector) InitializeServicesFor(serviceNames []string) error {
 				)
 			}
 			ec.services["google_calendar"] = &CalendarServiceClient{client: calendarClient}
-			fmt.Println("Google Calendar client initialized successfully")
+			collectorLogger.Infof("Google Calendarクライアントを初期化しました")
 
 		default:
 			return fmt.Errorf("未知のサービスが指定されました: %s", serviceName)
@@ -260,7 +262,7 @@ func (ec *EventCollector) InitializeServicesFor(serviceNames []string) error {
 		return fmt.Errorf("有効または適切に設定されたサービスがありません")
 	}
 
-	fmt.Printf("Initialized %d target service(s)\n", len(ec.services))
+	collectorLogger.Infof("%d 件の対象サービスを初期化しました", len(ec.services))
 	return nil
 }
 
@@ -290,7 +292,7 @@ func (ec *EventCollector) CollectEvents(startTime, endTime time.Time, serviceNam
 			if client, exists := ec.services[serviceName]; exists {
 				servicesToCollect[serviceName] = client
 			} else {
-				fmt.Printf("警告: サービス '%s' は利用できないか設定されていません\n", serviceName)
+				collectorLogger.Warnf("サービス '%s' は利用できないか設定されていません", serviceName)
 			}
 		}
 	}
@@ -299,7 +301,11 @@ func (ec *EventCollector) CollectEvents(startTime, endTime time.Time, serviceNam
 		return nil, fmt.Errorf("収集可能なサービスがありません")
 	}
 
-	fmt.Printf("Collecting events from %s to %s\n", startTime.Format("2006-01-02 15:04:05"), endTime.Format("2006-01-02 15:04:05"))
+	collectorLogger.Infof(
+		"イベント収集を開始します: %s から %s",
+		startTime.Format("2006-01-02 15:04:05"),
+		endTime.Format("2006-01-02 15:04:05"),
+	)
 
 	// 各サービスからイベントを並列収集
 	var wg sync.WaitGroup
@@ -312,16 +318,17 @@ func (ec *EventCollector) CollectEvents(startTime, endTime time.Time, serviceNam
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			serviceLogger := utils.NewLogger().WithService(serviceName)
 
-			fmt.Printf("Collecting events from %s...\n", serviceName)
+			serviceLogger.Infof("イベント収集を開始します")
 
 			events, err := client.CollectEvents(startTime, endTime)
 			if err != nil {
-				fmt.Printf("Error collecting events from %s: %v\n", serviceName, err)
+				serviceLogger.Errorf("イベント収集に失敗しました: %v", err)
 				return
 			}
 
-			fmt.Printf("Collected %d events from %s\n", len(events), serviceName)
+			serviceLogger.Infof("%d 件のイベントを収集しました", len(events))
 
 			mu.Lock()
 			allEvents = append(allEvents, events...)
@@ -334,7 +341,7 @@ func (ec *EventCollector) CollectEvents(startTime, endTime time.Time, serviceNam
 	// イベントをタイムスタンプでソート
 	ec.sortEventsByTimestamp(allEvents)
 
-	fmt.Printf("Total events collected: %d\n", len(allEvents))
+	collectorLogger.Infof("収集完了: 合計 %d 件", len(allEvents))
 	return allEvents, nil
 }
 
@@ -346,17 +353,17 @@ func (ec *EventCollector) CollectAndStore(startTime, endTime time.Time, serviceN
 	}
 
 	if len(events) == 0 {
-		fmt.Println("No events found in the specified time range")
+		collectorLogger.Infof("指定された時間範囲でイベントは見つかりませんでした")
 		return nil
 	}
 
 	// イベントをデータベースに保存
-	fmt.Printf("Storing %d events in database...\n", len(events))
+	collectorLogger.Infof("%d 件のイベントをデータベースへ保存します", len(events))
 	if err := ec.db.InsertEvents(events); err != nil {
 		return fmt.Errorf("イベント保存に失敗しました: %w", err)
 	}
 
-	fmt.Println("Events stored successfully")
+	collectorLogger.Infof("イベントを保存しました")
 	return nil
 }
 
@@ -499,10 +506,10 @@ func (ec *EventCollector) InitializeServicesWithAuth() error {
 	if slackAuth, exists := ec.authManagers["slack"]; exists {
 		slackClient, err := services.NewSlackClientWithAuth(slackAuth, ec.config)
 		if err != nil {
-			fmt.Printf("警告: 認証マネージャーでのSlackクライアント初期化に失敗しました: %v\n", err)
+			collectorLogger.Warnf("認証マネージャーでのSlackクライアント初期化に失敗しました: %v", err)
 		} else {
 			ec.services["slack"] = &SlackServiceClient{client: slackClient}
-			fmt.Println("Slack client initialized with auth manager successfully")
+			collectorLogger.Infof("認証マネージャー経由でSlackクライアントを初期化しました")
 		}
 	}
 
@@ -510,10 +517,10 @@ func (ec *EventCollector) InitializeServicesWithAuth() error {
 	if githubAuth, exists := ec.authManagers["github"]; exists {
 		githubClient, err := services.NewGitHubClientWithAuth(githubAuth, ec.config)
 		if err != nil {
-			fmt.Printf("警告: 認証マネージャーでのGitHubクライアント初期化に失敗しました: %v\n", err)
+			collectorLogger.Warnf("認証マネージャーでのGitHubクライアント初期化に失敗しました: %v", err)
 		} else {
 			ec.services["github"] = &GitHubServiceClient{client: githubClient}
-			fmt.Println("GitHub client initialized with auth manager successfully")
+			collectorLogger.Infof("認証マネージャー経由でGitHubクライアントを初期化しました")
 		}
 	}
 
@@ -521,10 +528,10 @@ func (ec *EventCollector) InitializeServicesWithAuth() error {
 	if ec.config.GoogleCal.Enabled {
 		calendarClient, err := services.NewCalendarClient(ec.config)
 		if err != nil {
-			fmt.Printf("警告: Google Calendarクライアントの初期化に失敗しました: %v\n", err)
+			collectorLogger.Warnf("Google Calendarクライアントの初期化に失敗しました: %v", err)
 		} else {
 			ec.services["google_calendar"] = &CalendarServiceClient{client: calendarClient}
-			fmt.Println("Google Calendar client initialized successfully")
+			collectorLogger.Infof("Google Calendarクライアントを初期化しました")
 		}
 	}
 
@@ -532,7 +539,7 @@ func (ec *EventCollector) InitializeServicesWithAuth() error {
 		return fmt.Errorf("有効または適切に設定されたサービスがありません")
 	}
 
-	fmt.Printf("Initialized %d service(s) with auth managers\n", len(ec.services))
+	collectorLogger.Infof("認証マネージャー経由で %d 件のサービスを初期化しました", len(ec.services))
 	return nil
 }
 
@@ -584,13 +591,14 @@ func (ec *EventCollector) RefreshExpiredTokens(ctx context.Context) error {
 
 	for serviceName, authManager := range ec.authManagers {
 		if authManager.IsTokenExpired() {
-			fmt.Printf("Refreshing expired token for %s...\n", serviceName)
+			serviceLogger := utils.NewLogger().WithService(serviceName)
+			serviceLogger.Infof("期限切れトークンの更新を開始します")
 			if err := authManager.RefreshToken(ctx); err != nil {
 				errorMsg := fmt.Sprintf("Failed to refresh token for %s: %v", serviceName, err)
 				errors = append(errors, errorMsg)
-				fmt.Printf("警告: %s\n", errorMsg)
+				serviceLogger.Warnf("%s", errorMsg)
 			} else {
-				fmt.Printf("Successfully refreshed token for %s\n", serviceName)
+				serviceLogger.Infof("トークンを更新しました")
 			}
 		}
 	}

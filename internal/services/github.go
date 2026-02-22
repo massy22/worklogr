@@ -14,6 +14,8 @@ import (
 	"golang.org/x/oauth2"
 )
 
+var githubLogger = utils.NewLogger().WithService("github")
+
 // GitHubClient はGitHub API操作を処理します
 type GitHubClient struct {
 	client          *github.Client
@@ -143,7 +145,7 @@ func (gc *GitHubClient) GetAuthStatus() *auth.AuthStatus {
 func (gc *GitHubClient) CollectGitHubEvents(startTime, endTime time.Time) ([]*config.Event, error) {
 	var events []*config.Event
 
-	fmt.Printf("🔍 %s から %s まで GitHub イベントを収集中\n",
+	githubLogger.Infof("%s から %s までGitHubイベントを収集します",
 		startTime.Format("2006-01-02 15:04:05"), endTime.Format("2006-01-02 15:04:05"))
 
 	// タイムゾーンマネージャーを使用して設定されたタイムゾーンに時刻を変換
@@ -155,46 +157,46 @@ func (gc *GitHubClient) CollectGitHubEvents(startTime, endTime time.Time) ([]*co
 	endDate := endTimeInTZ.Format("2006-01-02")
 
 	// 検索を使用してコミットを収集
-	fmt.Printf("🔍 ユーザー '%s' の GitHub コミットを検索中 (%s から %s)\n", gc.user, startDate, endDate)
+	githubLogger.Infof("ユーザー '%s' のコミットを検索します (%s から %s)", gc.user, startDate, endDate)
 	commits, err := gc.searchCommits(startDate, endDate)
 	if err != nil {
-		fmt.Printf("警告: コミット検索に失敗しました: %v\n", err)
+		githubLogger.Warnf("コミット検索に失敗しました: %v", err)
 	} else {
-		fmt.Printf("   → %d 件のコミットを発見\n", len(commits))
+		githubLogger.Infof("コミットを %d 件取得しました", len(commits))
 		events = append(events, commits...)
 	}
 
 	// 検索を使用してIssueを収集
-	fmt.Printf("🔍 '%s' が作成/クローズした GitHub Issue を検索中\n", gc.user)
+	githubLogger.Infof("ユーザー '%s' が作成またはクローズしたIssueを検索します", gc.user)
 	issues, err := gc.searchIssues(startDate, endDate)
 	if err != nil {
-		fmt.Printf("警告: Issue 検索に失敗しました: %v\n", err)
+		githubLogger.Warnf("Issue検索に失敗しました: %v", err)
 	} else {
-		fmt.Printf("   → %d 件の Issue を発見\n", len(issues))
+		githubLogger.Infof("Issueを %d 件取得しました", len(issues))
 		events = append(events, issues...)
 	}
 
 	// 検索を使用してプルリクエストを収集
-	fmt.Printf("🔍 '%s' の GitHub プルリクエストを検索中\n", gc.user)
+	githubLogger.Infof("ユーザー '%s' のプルリクエストを検索します", gc.user)
 	prs, err := gc.searchPullRequests(startDate, endDate)
 	if err != nil {
-		fmt.Printf("警告: プルリクエスト検索に失敗しました: %v\n", err)
+		githubLogger.Warnf("プルリクエスト検索に失敗しました: %v", err)
 	} else {
-		fmt.Printf("   → %d 件のプルリクエストを発見\n", len(prs))
+		githubLogger.Infof("プルリクエストを %d 件取得しました", len(prs))
 		events = append(events, prs...)
 	}
 
 	// 検索を使用してPRレビューを収集
-	fmt.Printf("🔍 '%s' の GitHub PR レビューを検索中\n", gc.user)
+	githubLogger.Infof("ユーザー '%s' のPRレビューを検索します", gc.user)
 	reviews, err := gc.searchPRReviews(startDate, endDate)
 	if err != nil {
-		fmt.Printf("警告: PR レビュー検索に失敗しました: %v\n", err)
+		githubLogger.Warnf("PRレビュー検索に失敗しました: %v", err)
 	} else {
-		fmt.Printf("   → %d 件のレビューを発見\n", len(reviews))
+		githubLogger.Infof("PRレビューを %d 件取得しました", len(reviews))
 		events = append(events, reviews...)
 	}
 
-	fmt.Printf("✅ 合計 %d 件の GitHub イベントを収集しました\n", len(events))
+	githubLogger.Infof("GitHubイベント収集完了: 合計 %d 件", len(events))
 	return events, nil
 }
 
@@ -334,7 +336,7 @@ func (gc *GitHubClient) collectPullRequests(repo *github.Repository, startTime, 
 			// Collect PR review comments
 			reviewEvents, err := gc.collectPRReviews(repo, pr, startTime, endTime)
 			if err != nil {
-				fmt.Printf("Warning: failed to collect PR reviews for #%d: %v\n", pr.GetNumber(), err)
+				githubLogger.Warnf("PR #%d のレビュー取得に失敗しました: %v", pr.GetNumber(), err)
 			} else {
 				events = append(events, reviewEvents...)
 			}
@@ -727,13 +729,13 @@ func (gc *GitHubClient) searchPRReviews(startDate, endDate string) ([]*config.Ev
 
 				// Show progress for large datasets
 				if processedCount%10 == 0 {
-					fmt.Printf("   レビュー取得中... %d/%d PRs 処理済み\n", processedCount, totalPRs)
+					githubLogger.Infof("レビュー取得進捗: %d/%d PR", processedCount, totalPRs)
 				}
 
 				// Get PR reviews to find the specific review by this user
 				reviews, err := gc.getPRReviewsInDateRange(repoInfo.Owner, repoInfo.Name, issue.GetNumber(), startDate, endDate)
 				if err != nil {
-					fmt.Printf("警告: PR #%d のレビュー取得に失敗しました: %v\n", issue.GetNumber(), err)
+					githubLogger.Warnf("PR #%d のレビュー取得に失敗しました: %v", issue.GetNumber(), err)
 					continue
 				}
 				events = append(events, reviews...)

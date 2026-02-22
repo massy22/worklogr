@@ -6,8 +6,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/iriam/worklogr/internal/utils"
 	"github.com/slack-go/slack"
 )
+
+var retryLogger = utils.NewLogger().WithService("slack")
 
 // RetryableSlackClient wraps the Slack client with retry functionality
 type RetryableSlackClient struct {
@@ -84,8 +87,7 @@ func (rt *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		// Get retry delay from Retry-After header
 		retryAfter := getRetryAfterDelay(resp)
 		
-		fmt.Printf("Rate limited (429). Waiting %v before retry %d/%d...\n", 
-			retryAfter, attempt+1, rt.MaxRetries)
+		retryLogger.Warnf("Rate limit (429): %v 後にリトライします (%d/%d)", retryAfter, attempt+1, rt.MaxRetries)
 		
 		// Close the response body before retrying
 		resp.Body.Close()
@@ -155,8 +157,7 @@ func (r *RetryableSlackClient) RetryableAPICall(operation string, apiCall func()
 				retryAfter = 5 * time.Minute
 			}
 
-			fmt.Printf("Slack API rate limited for %s. Waiting %v before retry %d/%d...\n", 
-				operation, retryAfter, attempt+1, r.maxRetries)
+			retryLogger.Warnf("Slack API rate limit: %s は %v 後にリトライします (%d/%d)", operation, retryAfter, attempt+1, r.maxRetries)
 			
 			time.Sleep(retryAfter)
 			continue

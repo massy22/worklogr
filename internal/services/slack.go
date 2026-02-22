@@ -13,6 +13,8 @@ import (
 	"github.com/slack-go/slack"
 )
 
+var slackLogger = utils.NewLogger().WithService("slack")
+
 // SlackClient はSlack API操作を処理します
 type SlackClient struct {
 	client          *slack.Client
@@ -144,23 +146,23 @@ func (sc *SlackClient) GetAuthStatus() *auth.AuthStatus {
 func (sc *SlackClient) CollectSlackEvents(startTime, endTime time.Time) ([]*config.Event, error) {
 	var events []*config.Event
 
-	fmt.Printf("ユーザー %s の Slack イベントを %s から %s まで収集中\n",
+	slackLogger.Infof("ユーザー %s のSlackイベントを %s から %s まで収集します",
 		sc.userID, startTime.Format("2006-01-02 15:04:05"), endTime.Format("2006-01-02 15:04:05"))
 
 	// 包括的なメッセージ収集のため検索ベースのアプローチを使用
-	fmt.Println("包括的な収集のため検索ベースの収集を使用中...")
+	slackLogger.Infof("検索ベース収集を使用します")
 	searchEvents, err := sc.collectMessagesViaSearch(startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("検索ベースの収集に失敗しました: %w", err)
 	}
 
-	fmt.Printf("✅ Search API による収集が成功しました！ %d 件のメッセージを発見\n", len(searchEvents))
+	slackLogger.Infof("Search APIで %d 件のメッセージを取得しました", len(searchEvents))
 	events = append(events, searchEvents...)
 
 	// 注意: ダイレクトメッセージは既に検索結果に含まれています
 	// Search API使用時は別途DM収集は不要です
 
-	fmt.Printf("合計 %d 件の Slack イベントを収集しました\n", len(events))
+	slackLogger.Infof("Slackイベント収集完了: 合計 %d 件", len(events))
 	return events, nil
 }
 
@@ -188,7 +190,7 @@ func (sc *SlackClient) collectMessagesViaSearch(startTime, endTime time.Time) ([
 	// 認証されたユーザーからのメッセージを検索
 	query := fmt.Sprintf("from:@%s after:%s before:%s", sc.userID, startDateForSearch, endDateForSearch)
 
-	fmt.Printf("クエリでメッセージを検索中: %s (%s から %s をカバー)\n",
+	slackLogger.Infof("メッセージ検索を実行します: %s (%s から %s をカバー)",
 		query, startTime.Format("2006-01-02"), endTime.Format("2006-01-02"))
 
 	var searchResult *slack.SearchMessages
@@ -206,7 +208,7 @@ func (sc *SlackClient) collectMessagesViaSearch(startTime, endTime time.Time) ([
 		return nil, fmt.Errorf("メッセージ検索に失敗しました: %w", err)
 	}
 
-	fmt.Printf("検索で %d 件のメッセージを発見\n", len(searchResult.Matches))
+	slackLogger.Infof("初回検索で %d 件のメッセージを取得しました", len(searchResult.Matches))
 
 	// 検索結果を処理
 	for _, match := range searchResult.Matches {
@@ -256,7 +258,7 @@ func (sc *SlackClient) collectMessagesViaSearch(startTime, endTime time.Time) ([
 
 	// より多くの結果がある場合はページネーションを処理
 	if searchResult.Paging.Pages > 1 {
-		fmt.Printf("追加ページを処理中 (全 %d ページ)...\n", searchResult.Paging.Pages)
+		slackLogger.Infof("追加ページを処理します: 全 %d ページ", searchResult.Paging.Pages)
 
 		for page := 2; page <= searchResult.Paging.Pages; page++ {
 			time.Sleep(1 * time.Second) // レート制限
@@ -274,11 +276,11 @@ func (sc *SlackClient) collectMessagesViaSearch(startTime, endTime time.Time) ([
 			})
 
 			if err != nil {
-				fmt.Printf("警告: ページ %d の取得に失敗しました: %v\n", page, err)
+				slackLogger.Warnf("ページ %d の取得に失敗しました: %v", page, err)
 				continue
 			}
 
-			fmt.Printf("ページ %d/%d を処理中 (%d 件のメッセージ)\n", page, searchResult.Paging.Pages, len(pageResult.Matches))
+			slackLogger.Infof("ページ %d/%d を処理中: %d 件", page, searchResult.Paging.Pages, len(pageResult.Matches))
 
 			for _, match := range pageResult.Matches {
 				ts, err := strconv.ParseFloat(match.Timestamp, 64)
@@ -323,7 +325,7 @@ func (sc *SlackClient) collectMessagesViaSearch(startTime, endTime time.Time) ([
 		}
 	}
 
-	fmt.Printf("検索で %d 件のメッセージを収集しました\n", len(events))
+	slackLogger.Infof("検索収集完了: %d 件", len(events))
 	return events, nil
 }
 
