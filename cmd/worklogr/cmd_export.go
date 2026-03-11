@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/iriam/worklogr/internal/app"
 	"github.com/spf13/cobra"
 )
 
@@ -16,6 +17,7 @@ type exportOptions struct {
 
 func newExportCmd(rootOptions *rootOptions) *cobra.Command {
 	options := &exportOptions{}
+	usecase := app.NewExportUsecase()
 	cmd := &cobra.Command{
 		Use:   "export",
 		Short: "収集したイベントをエクスポート",
@@ -32,24 +34,25 @@ json-ai 形式では、イベントのmetadataに加えて、添付本文（Goog
 				startTime.Format("2006-01-02 15:04:05"),
 				endTime.Format("2006-01-02 15:04:05"))
 
-			_, db, err := loadCLIConfigAndDatabase(rootOptions.configPath)
+			result, err := usecase.Run(app.ExportRequest{
+				ConfigPath: rootOptions.configPath,
+				StartTime:  startTime,
+				EndTime:    endTime,
+				Services:   options.services,
+				Format:     options.format,
+				OutputPath: options.outputPath,
+			})
 			if err != nil {
 				return err
 			}
-			defer db.Close()
 
-			events, err := db.GetEvents(startTime, endTime, options.services)
-			if err != nil {
-				return fmt.Errorf("イベントの取得に失敗しました: %w", err)
-			}
-
-			if len(events) == 0 {
+			if result.EventCount == 0 {
 				fmt.Println("指定された期間にイベントが見つかりませんでした")
 				return nil
 			}
 
-			fmt.Printf("エクスポート対象のイベントが %d 件見つかりました\n", len(events))
-			return exportEvents(events, options.format, options.outputPath)
+			fmt.Printf("エクスポート対象のイベントが %d 件見つかりました\n", result.EventCount)
+			return nil
 		},
 	}
 
