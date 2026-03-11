@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/iriam/worklogr/internal/app"
 	"github.com/spf13/cobra"
 )
 
@@ -17,49 +18,28 @@ func newConfigCmd(rootOptions *rootOptions) *cobra.Command {
 }
 
 func newConfigShowCmd(rootOptions *rootOptions) *cobra.Command {
+	usecase := app.NewConfigShowUsecase()
+
 	return &cobra.Command{
 		Use:   "show",
 		Short: "現在の設定を表示",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := loadCLIConfig(rootOptions.configPath)
+			result, err := usecase.Run(app.ConfigShowRequest{ConfigPath: rootOptions.configPath})
 			if err != nil {
 				return err
 			}
 
 			fmt.Println("現在の設定:")
 			fmt.Println("===========")
-			fmt.Printf("データベースパス: %s\n", cfg.DatabasePath)
-			fmt.Printf("タイムゾーン: %s\n", cfg.Timezone)
+			fmt.Printf("データベースパス: %s\n", result.DatabasePath)
+			fmt.Printf("タイムゾーン: %s\n", result.Timezone)
 			fmt.Println("\nサービス:")
 
-			services := map[string]struct {
-				displayName string
-				configured  bool
-				enabled     bool
-			}{
-				"slack": {
-					displayName: serviceDisplayNames["slack"],
-					configured:  cfg.Slack.ClientID != "" && cfg.Slack.ClientSecret != "",
-					enabled:     cfg.Slack.Enabled,
-				},
-				"github": {
-					displayName: serviceDisplayNames["github"],
-					configured:  cfg.GitHub.ClientID != "" && cfg.GitHub.ClientSecret != "",
-					enabled:     cfg.GitHub.Enabled,
-				},
-				"google_calendar": {
-					displayName: serviceDisplayNames["google_calendar"],
-					configured:  cfg.GoogleCal.ClientID != "" && cfg.GoogleCal.ClientSecret != "",
-					enabled:     cfg.GoogleCal.Enabled,
-				},
-			}
-
-			for _, serviceName := range orderedServiceNames {
-				service := services[serviceName]
+			for _, service := range result.Services {
 				fmt.Printf("  %-15s: 有効=%t, 設定済み=%t\n",
-					service.displayName,
-					service.enabled,
-					service.configured)
+					service.DisplayName,
+					service.Enabled,
+					service.Configured)
 			}
 
 			return nil
