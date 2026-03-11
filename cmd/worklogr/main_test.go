@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/iriam/worklogr/internal/config"
 )
 
 func writeCommandTestConfig(t *testing.T, timezone string) string {
@@ -89,68 +87,6 @@ func TestAdjustInclusiveEndTimeCapsFutureDateOnlyAtNow(t *testing.T) {
 	got := adjustInclusiveEndTime(endTime, now)
 	if !got.Equal(now) {
 		t.Fatalf("expected adjusted end time to cap at now %v, got %v", now, got)
-	}
-}
-
-func TestResolveCollectServicesReturnsEnabledServicesInOrder(t *testing.T) {
-	cfg := &config.Config{
-		Slack:     config.ServiceConfig{Enabled: true},
-		GitHub:    config.ServiceConfig{Enabled: false},
-		GoogleCal: config.ServiceConfig{Enabled: true},
-	}
-
-	got, err := resolveCollectServices(cfg, nil)
-	if err != nil {
-		t.Fatalf("resolveCollectServices returned error: %v", err)
-	}
-
-	want := []string{"slack", "google_calendar"}
-	if len(got) != len(want) {
-		t.Fatalf("expected %d services, got %d (%v)", len(want), len(got), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("expected services %v, got %v", want, got)
-		}
-	}
-}
-
-func TestResolveCollectServicesNormalizesAndDeduplicates(t *testing.T) {
-	cfg := &config.Config{
-		Slack:     config.ServiceConfig{Enabled: true},
-		GitHub:    config.ServiceConfig{Enabled: true},
-		GoogleCal: config.ServiceConfig{Enabled: true},
-	}
-
-	got, err := resolveCollectServices(cfg, []string{" Slack ", "github", "slack", "GOOGLE_CALENDAR"})
-	if err != nil {
-		t.Fatalf("resolveCollectServices returned error: %v", err)
-	}
-
-	want := []string{"slack", "github", "google_calendar"}
-	if len(got) != len(want) {
-		t.Fatalf("expected %d services, got %d (%v)", len(want), len(got), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("expected services %v, got %v", want, got)
-		}
-	}
-}
-
-func TestResolveCollectServicesRejectsUnknownOrDisabledServices(t *testing.T) {
-	cfg := &config.Config{
-		Slack:     config.ServiceConfig{Enabled: true},
-		GitHub:    config.ServiceConfig{Enabled: false},
-		GoogleCal: config.ServiceConfig{Enabled: true},
-	}
-
-	if _, err := resolveCollectServices(cfg, []string{"unknown"}); err == nil {
-		t.Fatalf("expected unknown service to return error")
-	}
-
-	if _, err := resolveCollectServices(cfg, []string{"github"}); err == nil {
-		t.Fatalf("expected disabled service to return error")
 	}
 }
 

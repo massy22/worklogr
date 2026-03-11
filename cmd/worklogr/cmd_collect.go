@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/iriam/worklogr/internal/collector"
+	"github.com/iriam/worklogr/internal/app"
 	"github.com/spf13/cobra"
 )
 
@@ -15,6 +15,7 @@ type collectOptions struct {
 
 func newCollectCmd(rootOptions *rootOptions) *cobra.Command {
 	options := &collectOptions{}
+	usecase := app.NewCollectUsecase()
 	cmd := &cobra.Command{
 		Use:   "collect",
 		Short: "サービスからイベントを収集",
@@ -28,32 +29,17 @@ Google Calendarが有効な場合、イベントに添付されたGoogleドキ�
 				return fmt.Errorf("時間範囲が無効です: %w", err)
 			}
 
-			cfg, db, err := loadCLIConfigAndDatabase(rootOptions.configPath)
-			if err != nil {
-				return err
-			}
-			defer db.Close()
-
-			eventCollector := collector.NewEventCollector(cfg, db)
-			targetServices, err := resolveCollectServices(cfg, options.services)
-			if err != nil {
-				return err
-			}
-
-			if err := eventCollector.InitializeServicesFor(targetServices); err != nil {
-				return fmt.Errorf("サービスの初期化に失敗しました: %w", err)
-			}
-
-			if err := eventCollector.ValidateTimeRange(startTime, endTime); err != nil {
-				return fmt.Errorf("時間範囲が無効です: %w", err)
-			}
-
 			fmt.Printf("%s から %s までのイベントを収集中...\n",
 				startTime.Format("2006-01-02 15:04:05"),
 				endTime.Format("2006-01-02 15:04:05"))
 
-			if err := eventCollector.CollectAndStore(startTime, endTime, targetServices); err != nil {
-				return fmt.Errorf("イベント収集に失敗しました: %w", err)
+			if _, err := usecase.Run(app.CollectRequest{
+				ConfigPath: rootOptions.configPath,
+				StartTime:  startTime,
+				EndTime:    endTime,
+				Services:   options.services,
+			}); err != nil {
+				return err
 			}
 
 			fmt.Println("イベント収集が正常に完了しました！")
