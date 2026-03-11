@@ -62,7 +62,7 @@ worklogrは、各種サービスから指定期間のイベントを取得し、
 git clone https://github.com/iriam/worklogr.git
 cd worklogr
 go mod tidy
-go build -o worklogr cmd/worklogr/main.go
+go build -o worklogr ./cmd/worklogr
 ```
 
 ## 設定
