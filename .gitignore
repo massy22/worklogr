@@ -3,7 +3,7 @@
 worklogr.db
 
 # 実行ファイル
-worklogr
+/worklogr
 *.exe
 
 # 設定ファイル（個人用）
