@@ -21,18 +21,18 @@ func writeCommandTestConfig(t *testing.T, timezone string) string {
 }
 
 func TestParseTimeRangeRejectsStartAfterEnd(t *testing.T) {
-	configPath = writeCommandTestConfig(t, "UTC")
+	configPath := writeCommandTestConfig(t, "UTC")
 
-	_, _, err := parseTimeRange("2026-03-06 12:00:00", "2026-03-06 11:00:00")
+	_, _, err := parseTimeRange("2026-03-06 12:00:00", "2026-03-06 11:00:00", configPath)
 	if err == nil {
 		t.Fatalf("expected parseTimeRange to reject start after end")
 	}
 }
 
 func TestParseTimeStringUsesConfiguredTimezone(t *testing.T) {
-	configPath = writeCommandTestConfig(t, "UTC")
+	configPath := writeCommandTestConfig(t, "UTC")
 
-	got, err := parseTimeString("2026-03-06 12:34:56")
+	got, err := parseTimeString("2026-03-06 12:34:56", configPath)
 	if err != nil {
 		t.Fatalf("parseTimeString returned error: %v", err)
 	}
@@ -44,9 +44,9 @@ func TestParseTimeStringUsesConfiguredTimezone(t *testing.T) {
 }
 
 func TestParseTimeStringFallsBackToDefaultTimezoneWhenConfigLoadFails(t *testing.T) {
-	configPath = t.TempDir()
+	configPath := t.TempDir()
 
-	got, err := parseTimeString("2026-03-06 12:34:56")
+	got, err := parseTimeString("2026-03-06 12:34:56", configPath)
 	if err != nil {
 		t.Fatalf("parseTimeString returned error: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestParseTimeStringFallsBackToDefaultTimezoneWhenConfigLoadFails(t *testing
 }
 
 func TestParseAdjustedTimeRangeExpandsDateOnlyEnd(t *testing.T) {
-	configPath = writeCommandTestConfig(t, "UTC")
+	configPath := writeCommandTestConfig(t, "UTC")
 	nowFunc = func() time.Time {
 		return time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC)
 	}
@@ -67,7 +67,7 @@ func TestParseAdjustedTimeRangeExpandsDateOnlyEnd(t *testing.T) {
 		nowFunc = time.Now
 	})
 
-	startTime, endTime, err := parseAdjustedTimeRange("2026-03-06", "2026-03-07")
+	startTime, endTime, err := parseAdjustedTimeRange("2026-03-06", "2026-03-07", configPath)
 	if err != nil {
 		t.Fatalf("parseAdjustedTimeRange returned error: %v", err)
 	}
@@ -151,5 +151,47 @@ func TestResolveCollectServicesRejectsUnknownOrDisabledServices(t *testing.T) {
 
 	if _, err := resolveCollectServices(cfg, []string{"github"}); err == nil {
 		t.Fatalf("expected disabled service to return error")
+	}
+}
+
+func TestCommandBuildersKeepFlagStateIndependent(t *testing.T) {
+	rootOptions := &rootOptions{}
+	collectCmd := newCollectCmd(rootOptions)
+	exportCmd := newExportCmd(rootOptions)
+
+	if err := collectCmd.ParseFlags([]string{"--start", "2026-03-01", "--end", "2026-03-02", "--services", "slack"}); err != nil {
+		t.Fatalf("collect ParseFlags returned error: %v", err)
+	}
+
+	if got := exportCmd.Flags().Lookup("start").Value.String(); got != "" {
+		t.Fatalf("expected export start flag to remain empty, got %q", got)
+	}
+	if got := exportCmd.Flags().Lookup("services").Value.String(); got != "[]" {
+		t.Fatalf("expected export services flag to remain default, got %q", got)
+	}
+
+	if err := exportCmd.ParseFlags([]string{"--start", "2026-03-03", "--end", "2026-03-04", "--format", "csv"}); err != nil {
+		t.Fatalf("export ParseFlags returned error: %v", err)
+	}
+
+	if got := collectCmd.Flags().Lookup("format"); got != nil {
+		t.Fatalf("collect command should not have export-only format flag")
+	}
+	if got := exportCmd.Flags().Lookup("format").Value.String(); got != "csv" {
+		t.Fatalf("expected export format flag to be csv, got %q", got)
+	}
+}
+
+func TestNewRootCmdWiresExpectedSubcommands(t *testing.T) {
+	cmd := newRootCmd()
+
+	for _, subcommand := range []string{"gcloud", "collect", "export", "status", "config"} {
+		if _, _, err := cmd.Find([]string{subcommand}); err != nil {
+			t.Fatalf("expected root command to include %q: %v", subcommand, err)
+		}
+	}
+
+	if got := cmd.PersistentFlags().Lookup("config"); got == nil {
+		t.Fatalf("expected root command to have persistent config flag")
 	}
 }

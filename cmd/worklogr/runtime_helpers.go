@@ -9,7 +9,7 @@ import (
 	"github.com/iriam/worklogr/internal/exporter"
 )
 
-func loadCLIConfig() (*config.Config, error) {
+func loadCLIConfig(configPath string) (*config.Config, error) {
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("設定ファイルの読み込みに失敗しました: %w", err)
@@ -18,8 +18,8 @@ func loadCLIConfig() (*config.Config, error) {
 	return cfg, nil
 }
 
-func loadCLIConfigAndDatabase() (*config.Config, *database.DatabaseManager, error) {
-	cfg, err := loadCLIConfig()
+func loadCLIConfigAndDatabase(configPath string) (*config.Config, *database.DatabaseManager, error) {
+	cfg, err := loadCLIConfig(configPath)
 	if err != nil {
 		return nil, nil, err
 	}

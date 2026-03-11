@@ -6,29 +6,27 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
+type rootOptions struct {
 	configPath string
-	startDate  string
-	endDate    string
-	services   []string
-	outputPath string
-	format     string
-)
+}
 
-var rootCmd = &cobra.Command{
-	Use:   "worklogr",
-	Short: "報告書生成のためのマルチサービスイベント収集CLI",
-	Long: `worklogrは複数のサービス（Slack、GitHub、Google Calendar）からイベントを収集し、
+var rootCmd = newRootCmd()
+
+func newRootCmd() *cobra.Command {
+	options := &rootOptions{}
+	cmd := &cobra.Command{
+		Use:   "worklogr",
+		Short: "報告書生成のためのマルチサービスイベント収集CLI",
+		Long: `worklogrは複数のサービス（Slack、GitHub、Google Calendar）からイベントを収集し、
 SQLiteに保存して、JSON/CSV（AI向けJSONを含む）で出力するCLIツールです。
 
 Google Calendarはgcloud認証（ADC）を使用し、イベントに添付されたGoogleドキュメント（Geminiメモ等）の本文テキストも収集できます。
 添付本文はイベント本体とは別テーブル（event_attachments）に保存され、AI向けJSONでは context.attachments に含まれます。`,
-}
+	}
 
-func init() {
-	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "設定ファイルのパス")
-	rootCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.SetUsageTemplate(`使用方法:
+	cmd.PersistentFlags().StringVarP(&options.configPath, "config", "c", "", "設定ファイルのパス")
+	cmd.CompletionOptions.DisableDefaultCmd = true
+	cmd.SetUsageTemplate(`使用方法:
   {{.UseLine}}{{if .HasAvailableSubCommands}}
 
 利用可能なコマンド:{{range .Commands}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
@@ -63,15 +61,12 @@ func init() {
 			cmd.Help()
 		},
 	}
-	rootCmd.SetHelpCommand(helpCmd)
+	cmd.SetHelpCommand(helpCmd)
+	cmd.AddCommand(newGCloudCmd())
+	cmd.AddCommand(newCollectCmd(options))
+	cmd.AddCommand(newExportCmd(options))
+	cmd.AddCommand(newStatusCmd(options))
+	cmd.AddCommand(newConfigCmd(options))
 
-	gcloudCmd.AddCommand(gcloudStatusCmd)
-	gcloudCmd.AddCommand(gcloudSetupCmd)
-	configCmd.AddCommand(configShowCmd)
-
-	rootCmd.AddCommand(gcloudCmd)
-	rootCmd.AddCommand(collectCmd)
-	rootCmd.AddCommand(exportCmd)
-	rootCmd.AddCommand(statusCmd)
-	rootCmd.AddCommand(configCmd)
+	return cmd
 }

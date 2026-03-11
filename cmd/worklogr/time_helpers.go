@@ -12,8 +12,8 @@ import (
 
 var nowFunc = time.Now
 
-func parseAdjustedTimeRange(startStr, endStr string) (time.Time, time.Time, error) {
-	startTime, endTime, err := parseTimeRange(startStr, endStr)
+func parseAdjustedTimeRange(startStr, endStr, configPath string) (time.Time, time.Time, error) {
+	startTime, endTime, err := parseTimeRange(startStr, endStr, configPath)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
@@ -34,15 +34,15 @@ func adjustInclusiveEndTime(endTime, now time.Time) time.Time {
 	return now
 }
 
-func parseTimeRange(startStr, endStr string) (time.Time, time.Time, error) {
+func parseTimeRange(startStr, endStr, configPath string) (time.Time, time.Time, error) {
 	var startTime, endTime time.Time
 	var err error
 
-	if startTime, err = parseTimeString(startStr); err != nil {
+	if startTime, err = parseTimeString(startStr, configPath); err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("開始時刻が無効です: %w", err)
 	}
 
-	if endTime, err = parseTimeString(endStr); err != nil {
+	if endTime, err = parseTimeString(endStr, configPath); err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("終了時刻が無効です: %w", err)
 	}
 
@@ -53,7 +53,7 @@ func parseTimeRange(startStr, endStr string) (time.Time, time.Time, error) {
 	return startTime, endTime, nil
 }
 
-func parseTimeString(timeStr string) (time.Time, error) {
+func parseTimeString(timeStr, configPath string) (time.Time, error) {
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		cfg = &config.Config{Timezone: "Asia/Tokyo"}
