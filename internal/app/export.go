@@ -24,46 +24,35 @@ type ExportResult struct {
 }
 
 type ExportUsecase struct {
-	loadConfig   func(string) (*config.Config, error)
-	openDatabase func(string) (*database.DatabaseManager, error)
+	runtime      *appRuntime
 	exportEvents func([]*config.Event, string, string) error
 }
 
 func NewExportUsecase() *ExportUsecase {
 	return &ExportUsecase{
-		loadConfig:   config.LoadConfig,
-		openDatabase: database.NewDatabaseManager,
+		runtime:      newAppRuntime(),
 		exportEvents: exportEvents,
 	}
 }
 
 func (u *ExportUsecase) Run(request ExportRequest) (*ExportResult, error) {
-	cfg, err := u.loadConfig(request.ConfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("設定ファイルの読み込みに失敗しました: %w", err)
-	}
+	return withDatabase(u.runtime, request.ConfigPath, func(cfg *config.Config, db *database.DatabaseManager) (*ExportResult, error) {
+		events, err := db.GetEvents(request.StartTime, request.EndTime, request.Services)
+		if err != nil {
+			return nil, fmt.Errorf("イベントの取得に失敗しました: %w", err)
+		}
 
-	db, err := u.openDatabase(cfg.DatabasePath)
-	if err != nil {
-		return nil, fmt.Errorf("データベースの初期化に失敗しました: %w", err)
-	}
-	defer db.Close()
+		result := &ExportResult{EventCount: len(events)}
+		if len(events) == 0 {
+			return result, nil
+		}
 
-	events, err := db.GetEvents(request.StartTime, request.EndTime, request.Services)
-	if err != nil {
-		return nil, fmt.Errorf("イベントの取得に失敗しました: %w", err)
-	}
+		if err := u.exportEvents(events, request.Format, request.OutputPath); err != nil {
+			return nil, err
+		}
 
-	result := &ExportResult{EventCount: len(events)}
-	if len(events) == 0 {
 		return result, nil
-	}
-
-	if err := u.exportEvents(events, request.Format, request.OutputPath); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	})
 }
 
 func exportEvents(events []*config.Event, format, outputPath string) error {

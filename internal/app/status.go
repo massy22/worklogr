@@ -24,15 +24,13 @@ type statusCollector interface {
 }
 
 type StatusUsecase struct {
-	loadConfig   func(string) (*config.Config, error)
-	openDatabase func(string) (*database.DatabaseManager, error)
+	runtime      *appRuntime
 	newCollector func(*config.Config, *database.DatabaseManager) statusCollector
 }
 
 func NewStatusUsecase() *StatusUsecase {
 	return &StatusUsecase{
-		loadConfig:   config.LoadConfig,
-		openDatabase: database.NewDatabaseManager,
+		runtime: newAppRuntime(),
 		newCollector: func(cfg *config.Config, db *database.DatabaseManager) statusCollector {
 			return collector.NewEventCollector(cfg, db)
 		},
@@ -40,31 +38,22 @@ func NewStatusUsecase() *StatusUsecase {
 }
 
 func (u *StatusUsecase) Run(request StatusRequest) (*StatusResult, error) {
-	cfg, err := u.loadConfig(request.ConfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("設定ファイルの読み込みに失敗しました: %w", err)
-	}
+	return withDatabase(u.runtime, request.ConfigPath, func(cfg *config.Config, db *database.DatabaseManager) (*StatusResult, error) {
+		eventCollector := u.newCollector(cfg, db)
+		eventCollector.InitializeServices()
 
-	db, err := u.openDatabase(cfg.DatabasePath)
-	if err != nil {
-		return nil, fmt.Errorf("データベースの初期化に失敗しました: %w", err)
-	}
-	defer db.Close()
+		result := &StatusResult{
+			ServiceStatus: eventCollector.GetServiceStatus(),
+			Stats:         map[string]int{},
+		}
 
-	eventCollector := u.newCollector(cfg, db)
-	eventCollector.InitializeServices()
+		stats, err := db.GetStats()
+		if err != nil {
+			result.StatsError = fmt.Errorf("データベース統計の取得に失敗しました: %w", err)
+			return result, nil
+		}
 
-	result := &StatusResult{
-		ServiceStatus: eventCollector.GetServiceStatus(),
-		Stats:         map[string]int{},
-	}
-
-	stats, err := db.GetStats()
-	if err != nil {
-		result.StatsError = fmt.Errorf("データベース統計の取得に失敗しました: %w", err)
+		result.Stats = stats
 		return result, nil
-	}
-
-	result.Stats = stats
-	return result, nil
+	})
 }

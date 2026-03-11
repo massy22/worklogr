@@ -30,15 +30,13 @@ type collectCoordinator interface {
 }
 
 type CollectUsecase struct {
-	loadConfig   func(string) (*config.Config, error)
-	openDatabase func(string) (*database.DatabaseManager, error)
+	runtime      *appRuntime
 	newCollector func(*config.Config, *database.DatabaseManager) collectCoordinator
 }
 
 func NewCollectUsecase() *CollectUsecase {
 	return &CollectUsecase{
-		loadConfig:   config.LoadConfig,
-		openDatabase: database.NewDatabaseManager,
+		runtime: newAppRuntime(),
 		newCollector: func(cfg *config.Config, db *database.DatabaseManager) collectCoordinator {
 			return collector.NewEventCollector(cfg, db)
 		},
@@ -46,36 +44,27 @@ func NewCollectUsecase() *CollectUsecase {
 }
 
 func (u *CollectUsecase) Run(request CollectRequest) (*CollectResult, error) {
-	cfg, err := u.loadConfig(request.ConfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("設定ファイルの読み込みに失敗しました: %w", err)
-	}
+	return withDatabase(u.runtime, request.ConfigPath, func(cfg *config.Config, db *database.DatabaseManager) (*CollectResult, error) {
+		targetServices, err := resolveCollectServices(cfg, request.Services)
+		if err != nil {
+			return nil, err
+		}
 
-	db, err := u.openDatabase(cfg.DatabasePath)
-	if err != nil {
-		return nil, fmt.Errorf("データベースの初期化に失敗しました: %w", err)
-	}
-	defer db.Close()
+		eventCollector := u.newCollector(cfg, db)
+		if err := eventCollector.InitializeServicesFor(targetServices); err != nil {
+			return nil, fmt.Errorf("サービスの初期化に失敗しました: %w", err)
+		}
 
-	targetServices, err := resolveCollectServices(cfg, request.Services)
-	if err != nil {
-		return nil, err
-	}
+		if err := eventCollector.ValidateTimeRange(request.StartTime, request.EndTime); err != nil {
+			return nil, fmt.Errorf("時間範囲が無効です: %w", err)
+		}
 
-	eventCollector := u.newCollector(cfg, db)
-	if err := eventCollector.InitializeServicesFor(targetServices); err != nil {
-		return nil, fmt.Errorf("サービスの初期化に失敗しました: %w", err)
-	}
+		if err := eventCollector.CollectAndStore(request.StartTime, request.EndTime, targetServices); err != nil {
+			return nil, fmt.Errorf("イベント収集に失敗しました: %w", err)
+		}
 
-	if err := eventCollector.ValidateTimeRange(request.StartTime, request.EndTime); err != nil {
-		return nil, fmt.Errorf("時間範囲が無効です: %w", err)
-	}
-
-	if err := eventCollector.CollectAndStore(request.StartTime, request.EndTime, targetServices); err != nil {
-		return nil, fmt.Errorf("イベント収集に失敗しました: %w", err)
-	}
-
-	return &CollectResult{TargetServices: targetServices}, nil
+		return &CollectResult{TargetServices: targetServices}, nil
+	})
 }
 
 func resolveCollectServices(cfg *config.Config, requested []string) ([]string, error) {

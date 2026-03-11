@@ -34,11 +34,13 @@ func TestExportUsecaseRunExportsMatchedEvents(t *testing.T) {
 	var exportedPath string
 
 	usecase := &ExportUsecase{
-		loadConfig: func(path string) (*config.Config, error) {
-			return &config.Config{DatabasePath: dbPath}, nil
-		},
-		openDatabase: func(path string) (*database.DatabaseManager, error) {
-			return db, nil
+		runtime: &appRuntime{
+			loadConfig: func(path string) (*config.Config, error) {
+				return &config.Config{DatabasePath: dbPath}, nil
+			},
+			openDatabase: func(path string) (*database.DatabaseManager, error) {
+				return db, nil
+			},
 		},
 		exportEvents: func(events []*config.Event, format, outputPath string) error {
 			exportedCount = len(events)
@@ -76,11 +78,13 @@ func TestExportUsecaseRunSkipsExportWhenNoEventsMatched(t *testing.T) {
 
 	called := false
 	usecase := &ExportUsecase{
-		loadConfig: func(path string) (*config.Config, error) {
-			return &config.Config{DatabasePath: dbPath}, nil
-		},
-		openDatabase: func(path string) (*database.DatabaseManager, error) {
-			return db, nil
+		runtime: &appRuntime{
+			loadConfig: func(path string) (*config.Config, error) {
+				return &config.Config{DatabasePath: dbPath}, nil
+			},
+			openDatabase: func(path string) (*database.DatabaseManager, error) {
+				return db, nil
+			},
 		},
 		exportEvents: func(events []*config.Event, format, outputPath string) error {
 			called = true
@@ -107,10 +111,12 @@ func TestExportUsecaseRunSkipsExportWhenNoEventsMatched(t *testing.T) {
 
 func TestExportUsecaseRunReturnsConfigLoadError(t *testing.T) {
 	usecase := &ExportUsecase{
-		loadConfig: func(path string) (*config.Config, error) {
-			return nil, fmt.Errorf("boom")
+		runtime: &appRuntime{
+			loadConfig: func(path string) (*config.Config, error) {
+				return nil, fmt.Errorf("boom")
+			},
+			openDatabase: database.NewDatabaseManager,
 		},
-		openDatabase: database.NewDatabaseManager,
 		exportEvents: exportEvents,
 	}
 

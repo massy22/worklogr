@@ -92,15 +92,17 @@ func TestCollectUsecaseRunInitializesAndCollectsResolvedServices(t *testing.T) {
 
 	coordinator := &stubCollectCoordinator{}
 	usecase := &CollectUsecase{
-		loadConfig: func(path string) (*config.Config, error) {
-			return &config.Config{
-				DatabasePath: dbPath,
-				Slack:        config.ServiceConfig{Enabled: true},
-				GitHub:       config.ServiceConfig{Enabled: true},
-			}, nil
-		},
-		openDatabase: func(path string) (*database.DatabaseManager, error) {
-			return db, nil
+		runtime: &appRuntime{
+			loadConfig: func(path string) (*config.Config, error) {
+				return &config.Config{
+					DatabasePath: dbPath,
+					Slack:        config.ServiceConfig{Enabled: true},
+					GitHub:       config.ServiceConfig{Enabled: true},
+				}, nil
+			},
+			openDatabase: func(path string) (*database.DatabaseManager, error) {
+				return db, nil
+			},
 		},
 		newCollector: func(cfg *config.Config, db *database.DatabaseManager) collectCoordinator {
 			return coordinator
@@ -133,10 +135,12 @@ func TestCollectUsecaseRunInitializesAndCollectsResolvedServices(t *testing.T) {
 
 func TestCollectUsecaseRunReturnsConfigLoadError(t *testing.T) {
 	usecase := &CollectUsecase{
-		loadConfig: func(path string) (*config.Config, error) {
-			return nil, fmt.Errorf("boom")
+		runtime: &appRuntime{
+			loadConfig: func(path string) (*config.Config, error) {
+				return nil, fmt.Errorf("boom")
+			},
+			openDatabase: database.NewDatabaseManager,
 		},
-		openDatabase: database.NewDatabaseManager,
 		newCollector: func(cfg *config.Config, db *database.DatabaseManager) collectCoordinator {
 			return &stubCollectCoordinator{}
 		},

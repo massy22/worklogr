@@ -42,11 +42,13 @@ func TestStatusUsecaseRunReturnsStatusesAndStats(t *testing.T) {
 	}
 
 	usecase := &StatusUsecase{
-		loadConfig: func(path string) (*config.Config, error) {
-			return &config.Config{DatabasePath: dbPath}, nil
-		},
-		openDatabase: func(path string) (*database.DatabaseManager, error) {
-			return db, nil
+		runtime: &appRuntime{
+			loadConfig: func(path string) (*config.Config, error) {
+				return &config.Config{DatabasePath: dbPath}, nil
+			},
+			openDatabase: func(path string) (*database.DatabaseManager, error) {
+				return db, nil
+			},
 		},
 		newCollector: func(cfg *config.Config, db *database.DatabaseManager) statusCollector {
 			return &stubStatusCollector{
@@ -80,10 +82,12 @@ func TestStatusUsecaseRunReturnsStatusesAndStats(t *testing.T) {
 
 func TestStatusUsecaseRunReturnsConfigLoadError(t *testing.T) {
 	usecase := &StatusUsecase{
-		loadConfig: func(path string) (*config.Config, error) {
-			return nil, fmt.Errorf("boom")
+		runtime: &appRuntime{
+			loadConfig: func(path string) (*config.Config, error) {
+				return nil, fmt.Errorf("boom")
+			},
+			openDatabase: database.NewDatabaseManager,
 		},
-		openDatabase: database.NewDatabaseManager,
 		newCollector: func(cfg *config.Config, db *database.DatabaseManager) statusCollector {
 			return &stubStatusCollector{}
 		},
