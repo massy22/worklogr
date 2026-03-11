@@ -122,6 +122,9 @@ func TestCollectUsecaseRunInitializesAndCollectsResolvedServices(t *testing.T) {
 	if !reflect.DeepEqual(result.TargetServices, want) {
 		t.Fatalf("expected target services %v, got %v", want, result.TargetServices)
 	}
+	if result.CollectedRange.StartTime != time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC) || result.CollectedRange.EndTime != time.Date(2026, 3, 10, 18, 0, 0, 0, time.UTC) {
+		t.Fatalf("unexpected collected range: %+v", result.CollectedRange)
+	}
 	if !reflect.DeepEqual(coordinator.initializedWith, want) {
 		t.Fatalf("expected InitializeServicesFor to receive %v, got %v", want, coordinator.initializedWith)
 	}

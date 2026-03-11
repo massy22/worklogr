@@ -61,8 +61,8 @@ func TestExportUsecaseRunExportsMatchedEvents(t *testing.T) {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
-	if result.EventCount != 1 {
-		t.Fatalf("expected event count 1, got %d", result.EventCount)
+	if result.MatchedEventCount != 1 {
+		t.Fatalf("expected event count 1, got %d", result.MatchedEventCount)
 	}
 	if exportedCount != 1 || exportedFormat != "json" || exportedPath != "/tmp/output.json" {
 		t.Fatalf("unexpected export call: count=%d format=%q path=%q", exportedCount, exportedFormat, exportedPath)
@@ -101,8 +101,8 @@ func TestExportUsecaseRunSkipsExportWhenNoEventsMatched(t *testing.T) {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
-	if result.EventCount != 0 {
-		t.Fatalf("expected event count 0, got %d", result.EventCount)
+	if result.MatchedEventCount != 0 {
+		t.Fatalf("expected event count 0, got %d", result.MatchedEventCount)
 	}
 	if called {
 		t.Fatalf("expected export function not to be called when no events matched")

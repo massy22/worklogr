@@ -10,8 +10,6 @@ import (
 	"github.com/iriam/worklogr/internal/database"
 )
 
-var collectOrderedServiceNames = []string{"slack", "github", "google_calendar"}
-
 type CollectRequest struct {
 	ConfigPath string
 	StartTime  time.Time
@@ -21,6 +19,7 @@ type CollectRequest struct {
 
 type CollectResult struct {
 	TargetServices []string
+	CollectedRange TimeRange
 }
 
 type collectCoordinator interface {
@@ -63,15 +62,20 @@ func (u *CollectUsecase) Run(request CollectRequest) (*CollectResult, error) {
 			return nil, fmt.Errorf("イベント収集に失敗しました: %w", err)
 		}
 
-		return &CollectResult{TargetServices: targetServices}, nil
+		return &CollectResult{
+			TargetServices: targetServices,
+			CollectedRange: TimeRange{
+				StartTime: request.StartTime,
+				EndTime:   request.EndTime,
+			},
+		}, nil
 	})
 }
 
 func resolveCollectServices(cfg *config.Config, requested []string) ([]string, error) {
-	knownServices := map[string]bool{
-		"slack":           true,
-		"github":          true,
-		"google_calendar": true,
+	knownServices := make(map[string]bool, len(appServiceDefinitions))
+	for _, service := range appServiceDefinitions {
+		knownServices[service.Name] = true
 	}
 
 	enabledServices := map[string]bool{
@@ -82,9 +86,9 @@ func resolveCollectServices(cfg *config.Config, requested []string) ([]string, e
 
 	if len(requested) == 0 {
 		var targets []string
-		for _, serviceName := range collectOrderedServiceNames {
-			if enabledServices[serviceName] {
-				targets = append(targets, serviceName)
+		for _, service := range appServiceDefinitions {
+			if enabledServices[service.Name] {
+				targets = append(targets, service.Name)
 			}
 		}
 		if len(targets) == 0 {

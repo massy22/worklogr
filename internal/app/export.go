@@ -20,7 +20,7 @@ type ExportRequest struct {
 }
 
 type ExportResult struct {
-	EventCount int
+	MatchedEventCount int
 }
 
 type ExportUsecase struct {
@@ -42,7 +42,7 @@ func (u *ExportUsecase) Run(request ExportRequest) (*ExportResult, error) {
 			return nil, fmt.Errorf("イベントの取得に失敗しました: %w", err)
 		}
 
-		result := &ExportResult{EventCount: len(events)}
+		result := &ExportResult{MatchedEventCount: len(events)}
 		if len(events) == 0 {
 			return result, nil
 		}

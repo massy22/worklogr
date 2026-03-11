@@ -43,10 +43,10 @@ func TestConfigShowUsecaseRunBuildsDisplayResult(t *testing.T) {
 	if len(result.Services) != 3 {
 		t.Fatalf("expected 3 services, got %d", len(result.Services))
 	}
-	if result.Services[0].DisplayName != "Slack" || !result.Services[0].Enabled || !result.Services[0].Configured {
+	if result.Services[0].Name != "slack" || result.Services[0].DisplayName != "Slack" || !result.Services[0].Enabled || !result.Services[0].Configured {
 		t.Fatalf("unexpected slack config show service: %+v", result.Services[0])
 	}
-	if result.Services[1].DisplayName != "GitHub" || !result.Services[1].Enabled || result.Services[1].Configured {
+	if result.Services[1].Name != "github" || result.Services[1].DisplayName != "GitHub" || !result.Services[1].Enabled || result.Services[1].Configured {
 		t.Fatalf("unexpected github config show service: %+v", result.Services[1])
 	}
 }

@@ -46,12 +46,12 @@ json-ai 形式では、イベントのmetadataに加えて、添付本文（Goog
 				return err
 			}
 
-			if result.EventCount == 0 {
+			if result.MatchedEventCount == 0 {
 				fmt.Println("指定された期間にイベントが見つかりませんでした")
 				return nil
 			}
 
-			fmt.Printf("エクスポート対象のイベントが %d 件見つかりました\n", result.EventCount)
+			fmt.Printf("エクスポート対象のイベントが %d 件見つかりました\n", result.MatchedEventCount)
 			return nil
 		},
 	}
