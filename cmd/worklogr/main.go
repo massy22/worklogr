@@ -3,16 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/iriam/worklogr/internal/auth"
 	"github.com/iriam/worklogr/internal/collector"
-	"github.com/iriam/worklogr/internal/config"
-	"github.com/iriam/worklogr/internal/database"
-	"github.com/iriam/worklogr/internal/exporter"
-	"github.com/iriam/worklogr/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -142,40 +136,17 @@ var collectCmd = &cobra.Command{
 Google Calendarが有効な場合、イベントに添付されたGoogleドキュメント（Geminiメモ等）の本文テキストも取得できます（デフォルトON）。
 添付本文は event_attachments テーブルに保存され、動画などの添付は対象外です。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// 時間範囲を解析
-		startTime, endTime, err := parseTimeRange(startDate, endDate)
+		startTime, endTime, err := parseAdjustedTimeRange(startDate, endDate)
 		if err != nil {
 			return fmt.Errorf("時間範囲が無効です: %w", err)
 		}
 
-		// 終了日全体を含むように終了時刻を調整
-		// 終了時刻が00:00:00の場合、同日の23:59:59まで延長
-		// ただし未来の時刻にならないよう確認
-		if endTime.Hour() == 0 && endTime.Minute() == 0 && endTime.Second() == 0 {
-			adjustedEndTime := endTime.Add(24*time.Hour - time.Second)
-			// 未来の時刻にならない場合のみ調整
-			if !adjustedEndTime.After(time.Now()) {
-				endTime = adjustedEndTime
-			} else {
-				// 今日の場合は現在時刻に設定
-				endTime = time.Now()
-			}
-		}
-
-		// 設定を読み込み
-		cfg, err := config.LoadConfig(configPath)
+		cfg, db, err := loadCLIConfigAndDatabase()
 		if err != nil {
-			return fmt.Errorf("設定ファイルの読み込みに失敗しました: %w", err)
-		}
-
-		// データベースを初期化
-		db, err := database.NewDatabaseManager(cfg.DatabasePath)
-		if err != nil {
-			return fmt.Errorf("データベースの初期化に失敗しました: %w", err)
+			return err
 		}
 		defer db.Close()
 
-		// イベントコレクターを初期化
 		eventCollector := collector.NewEventCollector(cfg, db)
 		targetServices, err := resolveCollectServices(cfg, services)
 		if err != nil {
@@ -213,44 +184,21 @@ var exportCmd = &cobra.Command{
 
 json-ai 形式では、イベントのmetadataに加えて、添付本文（Googleドキュメント等）がある場合は context.attachments に含めます。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// 時間範囲を解析
-		startTime, endTime, err := parseTimeRange(startDate, endDate)
+		startTime, endTime, err := parseAdjustedTimeRange(startDate, endDate)
 		if err != nil {
 			return fmt.Errorf("時間範囲が無効です: %w", err)
-		}
-
-		// エクスポート用に終了日全体を含むよう終了時刻を調整
-		// 終了時刻が00:00:00の場合、同日の23:59:59まで延長
-		// ただし未来の時刻にならないよう確認
-		if endTime.Hour() == 0 && endTime.Minute() == 0 && endTime.Second() == 0 {
-			adjustedEndTime := endTime.Add(24*time.Hour - time.Second)
-			// 未来の時刻にならない場合のみ調整
-			if !adjustedEndTime.After(time.Now()) {
-				endTime = adjustedEndTime
-			} else {
-				// 今日の場合は現在時刻に設定
-				endTime = time.Now()
-			}
 		}
 
 		fmt.Printf("%s から %s までのイベントをエクスポート中...\n",
 			startTime.Format("2006-01-02 15:04:05"),
 			endTime.Format("2006-01-02 15:04:05"))
 
-		// 設定を読み込み
-		cfg, err := config.LoadConfig(configPath)
+		_, db, err := loadCLIConfigAndDatabase()
 		if err != nil {
-			return fmt.Errorf("設定ファイルの読み込みに失敗しました: %w", err)
-		}
-
-		// データベースを初期化
-		db, err := database.NewDatabaseManager(cfg.DatabasePath)
-		if err != nil {
-			return fmt.Errorf("データベースの初期化に失敗しました: %w", err)
+			return err
 		}
 		defer db.Close()
 
-		// データベースからイベントを取得
 		events, err := db.GetEvents(startTime, endTime, services)
 		if err != nil {
 			return fmt.Errorf("イベントの取得に失敗しました: %w", err)
@@ -263,33 +211,7 @@ json-ai 形式では、イベントのmetadataに加えて、添付本文（Goog
 
 		fmt.Printf("エクスポート対象のイベントが %d 件見つかりました\n", len(events))
 
-		// 形式に基づいてエクスポート
-		switch strings.ToLower(format) {
-		case "json":
-			jsonExporter := exporter.NewJSONExporter()
-			if err := jsonExporter.ExportToJSON(events, outputPath); err != nil {
-				return fmt.Errorf("JSONエクスポートに失敗しました: %w", err)
-			}
-		case "json-ai":
-			jsonExporter := exporter.NewJSONExporter()
-			if err := jsonExporter.ExportForAI(events, outputPath); err != nil {
-				return fmt.Errorf("AI用JSONエクスポートに失敗しました: %w", err)
-			}
-		case "csv":
-			csvExporter := exporter.NewCSVExporter()
-			if err := csvExporter.ExportToCSV(events, outputPath); err != nil {
-				return fmt.Errorf("CSVエクスポートに失敗しました: %w", err)
-			}
-		case "csv-summary":
-			csvExporter := exporter.NewCSVExporter()
-			if err := csvExporter.ExportToCSVWithSummary(events, outputPath); err != nil {
-				return fmt.Errorf("サマリー付きCSVエクスポートに失敗しました: %w", err)
-			}
-		default:
-			return fmt.Errorf("サポートされていない形式です: %s。対応形式: json, json-ai, csv, csv-summary", format)
-		}
-
-		return nil
+		return exportEvents(events, format, outputPath)
 	},
 }
 
@@ -299,39 +221,23 @@ var statusCmd = &cobra.Command{
 	Short: "サービス状態を表示",
 	Long:  "設定されたすべてのサービスの状態を表示します",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// 設定を読み込み
-		cfg, err := config.LoadConfig(configPath)
+		cfg, db, err := loadCLIConfigAndDatabase()
 		if err != nil {
-			return fmt.Errorf("設定ファイルの読み込みに失敗しました: %w", err)
-		}
-
-		// データベースを初期化
-		db, err := database.NewDatabaseManager(cfg.DatabasePath)
-		if err != nil {
-			return fmt.Errorf("データベースの初期化に失敗しました: %w", err)
+			return err
 		}
 		defer db.Close()
 
-		// イベントコレクターを初期化
 		eventCollector := collector.NewEventCollector(cfg, db)
-		eventCollector.InitializeServices() // 初期化エラーでは失敗しない
-
-		// サービス状態を取得
+		eventCollector.InitializeServices()
 		status := eventCollector.GetServiceStatus()
 
-		// 状態を表示
 		fmt.Println("サービス状態:")
 		fmt.Println("=============")
-		serviceNames := map[string]string{
-			"slack":           "Slack",
-			"github":          "GitHub",
-			"google_calendar": "Google Calendar",
-		}
 
-		for _, serviceName := range []string{"slack", "github", "google_calendar"} {
+		for _, serviceName := range orderedServiceNames {
 			if serviceStatus, exists := status[serviceName]; exists {
 				fmt.Printf("%-15s | 有効: %-5t | 認証済み: %-5t | 初期化済み: %-5t\n",
-					serviceNames[serviceName],
+					serviceDisplayNames[serviceName],
 					serviceStatus.Enabled,
 					serviceStatus.Authenticated,
 					serviceStatus.Initialized)
@@ -346,7 +252,7 @@ var statusCmd = &cobra.Command{
 			fmt.Printf("データベース統計の取得に失敗しました: %v\n", err)
 		} else {
 			for service, count := range stats {
-				fmt.Printf("%-15s: %d イベント\n", serviceNames[service], count)
+				fmt.Printf("%-15s: %d イベント\n", serviceDisplayNames[service], count)
 			}
 		}
 
@@ -365,9 +271,9 @@ var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "現在の設定を表示",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.LoadConfig(configPath)
+		cfg, err := loadCLIConfig()
 		if err != nil {
-			return fmt.Errorf("設定ファイルの読み込みに失敗しました: %w", err)
+			return err
 		}
 
 		fmt.Println("現在の設定:")
@@ -376,17 +282,34 @@ var configShowCmd = &cobra.Command{
 		fmt.Printf("タイムゾーン: %s\n", cfg.Timezone)
 		fmt.Println("\nサービス:")
 
-		services := map[string]config.ServiceConfig{
-			"Slack":           cfg.Slack,
-			"GitHub":          cfg.GitHub,
-			"Google Calendar": cfg.GoogleCal,
+		services := map[string]struct {
+			displayName string
+			configured  bool
+			enabled     bool
+		}{
+			"slack": {
+				displayName: serviceDisplayNames["slack"],
+				configured:  cfg.Slack.ClientID != "" && cfg.Slack.ClientSecret != "",
+				enabled:     cfg.Slack.Enabled,
+			},
+			"github": {
+				displayName: serviceDisplayNames["github"],
+				configured:  cfg.GitHub.ClientID != "" && cfg.GitHub.ClientSecret != "",
+				enabled:     cfg.GitHub.Enabled,
+			},
+			"google_calendar": {
+				displayName: serviceDisplayNames["google_calendar"],
+				configured:  cfg.GoogleCal.ClientID != "" && cfg.GoogleCal.ClientSecret != "",
+				enabled:     cfg.GoogleCal.Enabled,
+			},
 		}
 
-		for name, service := range services {
+		for _, serviceName := range orderedServiceNames {
+			service := services[serviceName]
 			fmt.Printf("  %-15s: 有効=%t, 設定済み=%t\n",
-				name,
-				service.Enabled,
-				service.ClientID != "" && service.ClientSecret != "")
+				service.displayName,
+				service.enabled,
+				service.configured)
 		}
 
 		return nil
@@ -417,154 +340,4 @@ func init() {
 	gcloudCmd.AddCommand(gcloudStatusCmd)
 	gcloudCmd.AddCommand(gcloudSetupCmd)
 
-}
-
-// ヘルパー関数
-
-func parseTimeRange(startStr, endStr string) (time.Time, time.Time, error) {
-	var startTime, endTime time.Time
-	var err error
-
-	// 開始時刻を解析
-	if startTime, err = parseTimeString(startStr); err != nil {
-		return time.Time{}, time.Time{}, fmt.Errorf("開始時刻が無効です: %w", err)
-	}
-
-	// 終了時刻を解析
-	if endTime, err = parseTimeString(endStr); err != nil {
-		return time.Time{}, time.Time{}, fmt.Errorf("終了時刻が無効です: %w", err)
-	}
-
-	// 時間範囲を検証
-	if startTime.After(endTime) {
-		return time.Time{}, time.Time{}, fmt.Errorf("開始時刻は終了時刻より後にできません")
-	}
-
-	return startTime, endTime, nil
-}
-
-func parseTimeString(timeStr string) (time.Time, error) {
-	// タイムゾーン設定を取得するため設定を読み込み
-	cfg, err := config.LoadConfig(configPath)
-	if err != nil {
-		// 設定が読み込めない場合はJSTにフォールバック
-		cfg = &config.Config{Timezone: "Asia/Tokyo"}
-	}
-
-	// タイムゾーンマネージャーを作成
-	timezoneManager, err := utils.NewTimezoneManager(cfg.Timezone)
-	if err != nil {
-		// 無効な場合はデフォルトタイムゾーンにフォールバック
-		timezoneManager, _ = utils.NewTimezoneManager("Asia/Tokyo")
-	}
-
-	// タイムゾーンマネージャーで解析を試行
-	if t, err := timezoneManager.ParseTimeInTimezone(timeStr); err == nil {
-		return t, nil
-	}
-
-	return time.Time{}, fmt.Errorf("時刻の解析に失敗しました: %s", timeStr)
-}
-
-func parseRelativeTime(timeStr, timezone string) (time.Time, error) {
-	// 設定されたタイムゾーンを取得
-	loc, err := time.LoadLocation(timezone)
-	if err != nil {
-		// タイムゾーンが利用できない場合はUTC+9にフォールバック
-		loc = time.FixedZone("JST", 9*60*60)
-	}
-
-	// 設定されたタイムゾーンでの現在時刻を取得
-	now := time.Now().In(loc)
-
-	switch strings.ToLower(timeStr) {
-	case "now":
-		return now, nil
-	case "today":
-		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc), nil
-	case "yesterday":
-		yesterday := now.AddDate(0, 0, -1)
-		return time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 0, 0, 0, 0, loc), nil
-	}
-
-	// 期間ベースの相対時刻を解析（例: "1d", "2h", "30m"）
-	if len(timeStr) > 1 {
-		unit := timeStr[len(timeStr)-1:]
-		valueStr := timeStr[:len(timeStr)-1]
-
-		value, err := strconv.Atoi(valueStr)
-		if err != nil {
-			return time.Time{}, fmt.Errorf("相対時刻の値が無効です: %s", valueStr)
-		}
-
-		switch unit {
-		case "d":
-			return now.AddDate(0, 0, -value), nil
-		case "h":
-			return now.Add(time.Duration(-value) * time.Hour), nil
-		case "m":
-			return now.Add(time.Duration(-value) * time.Minute), nil
-		}
-	}
-
-	return time.Time{}, fmt.Errorf("サポートされていない相対時刻形式です: %s", timeStr)
-}
-
-func resolveCollectServices(cfg *config.Config, requested []string) ([]string, error) {
-	knownServices := map[string]bool{
-		"slack":           true,
-		"github":          true,
-		"google_calendar": true,
-	}
-
-	enabledServices := map[string]bool{
-		"slack":           cfg.Slack.Enabled,
-		"github":          cfg.GitHub.Enabled,
-		"google_calendar": cfg.GoogleCal.Enabled,
-	}
-
-	if len(requested) == 0 {
-		var targets []string
-		for _, serviceName := range []string{"slack", "github", "google_calendar"} {
-			if enabledServices[serviceName] {
-				targets = append(targets, serviceName)
-			}
-		}
-		if len(targets) == 0 {
-			return nil, fmt.Errorf("有効な収集対象サービスがありません")
-		}
-		return targets, nil
-	}
-
-	seen := make(map[string]bool)
-	var targets []string
-	for _, rawName := range requested {
-		serviceName := strings.ToLower(strings.TrimSpace(rawName))
-		if !knownServices[serviceName] {
-			return nil, fmt.Errorf("未知のサービスが指定されました: %s（指定可能: slack, github, google_calendar）", rawName)
-		}
-		if !enabledServices[serviceName] {
-			return nil, fmt.Errorf("サービス '%s' は設定で無効です。config.yaml を確認してください", serviceName)
-		}
-		if seen[serviceName] {
-			continue
-		}
-		seen[serviceName] = true
-		targets = append(targets, serviceName)
-	}
-
-	if len(targets) == 0 {
-		return nil, fmt.Errorf("収集対象サービスが指定されていません")
-	}
-
-	return targets, nil
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }

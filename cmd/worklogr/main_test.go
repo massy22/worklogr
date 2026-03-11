@@ -43,6 +43,55 @@ func TestParseTimeStringUsesConfiguredTimezone(t *testing.T) {
 	}
 }
 
+func TestParseTimeStringFallsBackToDefaultTimezoneWhenConfigLoadFails(t *testing.T) {
+	configPath = t.TempDir()
+
+	got, err := parseTimeString("2026-03-06 12:34:56")
+	if err != nil {
+		t.Fatalf("parseTimeString returned error: %v", err)
+	}
+
+	jst := time.FixedZone("JST", 9*60*60)
+	expected := time.Date(2026, 3, 6, 12, 34, 56, 0, jst)
+	if got.UTC() != expected.UTC() {
+		t.Fatalf("expected JST fallback time %v, got %v", expected, got)
+	}
+}
+
+func TestParseAdjustedTimeRangeExpandsDateOnlyEnd(t *testing.T) {
+	configPath = writeCommandTestConfig(t, "UTC")
+	nowFunc = func() time.Time {
+		return time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC)
+	}
+	t.Cleanup(func() {
+		nowFunc = time.Now
+	})
+
+	startTime, endTime, err := parseAdjustedTimeRange("2026-03-06", "2026-03-07")
+	if err != nil {
+		t.Fatalf("parseAdjustedTimeRange returned error: %v", err)
+	}
+
+	expectedStart := time.Date(2026, 3, 6, 0, 0, 0, 0, time.UTC)
+	expectedEnd := time.Date(2026, 3, 7, 23, 59, 59, 0, time.UTC)
+	if !startTime.Equal(expectedStart) {
+		t.Fatalf("expected start %v, got %v", expectedStart, startTime)
+	}
+	if !endTime.Equal(expectedEnd) {
+		t.Fatalf("expected end %v, got %v", expectedEnd, endTime)
+	}
+}
+
+func TestAdjustInclusiveEndTimeCapsFutureDateOnlyAtNow(t *testing.T) {
+	now := time.Date(2026, 3, 7, 10, 30, 0, 0, time.UTC)
+	endTime := time.Date(2026, 3, 7, 0, 0, 0, 0, time.UTC)
+
+	got := adjustInclusiveEndTime(endTime, now)
+	if !got.Equal(now) {
+		t.Fatalf("expected adjusted end time to cap at now %v, got %v", now, got)
+	}
+}
+
 func TestResolveCollectServicesReturnsEnabledServicesInOrder(t *testing.T) {
 	cfg := &config.Config{
 		Slack:     config.ServiceConfig{Enabled: true},
